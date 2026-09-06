@@ -1007,7 +1007,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
 
           {groups.length === 0 ? (
             <div className="bg-white doodle-border doodle-shadow p-8 text-center space-y-3">
-              <span className="text-4xl block">👥</span>
+              
               <h3 className="font-extrabold text-base font-['Bricolage_Grotesque']">ยังไม่มีกลุ่มในระบบ</h3>
               <p className="text-xs font-medium text-gray-600 max-w-xs mx-auto">
                 เริ่มต้นด้วยการสร้างกลุ่มใหม่เพื่อแชร์งาน และทำงานร่วมกับเพื่อนของคุณ
