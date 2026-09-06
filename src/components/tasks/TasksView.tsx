@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task, UserProfile, Goal, EisenhowerQuadrant } from '../../types';
 import { useTranslation } from '../../utils/translations';
 import { getLocalTodayStr } from '../../utils/date';
-import { Check, Trash2, Clock, Pencil, X, MapPin } from 'lucide-react';
+import { Check, Trash2, Clock, Pencil, X, MapPin, Share2, Users } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { db, auth } from '../../lib/firebase';
+import { collection, query, where, onSnapshot, addDoc } from 'firebase/firestore';
+import defaultGroupAvatarImg from '../../assets/group-default-avatar.jpg';
 
 interface TasksViewProps {
   user: UserProfile;
@@ -15,6 +18,26 @@ interface TasksViewProps {
   onDeleteTask: (taskId: string) => void;
   onNavigateToGoals: () => void;
 }
+
+// ข้อมูลกลุ่มแบบย่อ — ใช้แค่แสดงในตัวเลือก "แชร์งานลงกลุ่ม" เท่านั้น
+interface ShareableGroup {
+  id: string;
+  name: string;
+  imageUrl?: string;
+}
+
+// รูปปกกลุ่มแบบย่อ (ใช้ในตัวเลือก "แชร์งานลงกลุ่ม") — ถ้าโหลดรูปที่บันทึกไว้ไม่ขึ้น
+// (ลิงก์เสีย/URL asset รุ่นเก่าที่ใช้ไม่ได้แล้ว) ให้ตกกลับไปแสดงภาพ default ของแอปแทน
+const ShareGroupAvatar: React.FC<{ name: string; imageUrl?: string }> = ({ name, imageUrl }) => {
+  const [failed, setFailed] = useState(false);
+  const showCustom = !!imageUrl && imageUrl.trim() !== '' && !failed;
+
+  return showCustom ? (
+    <img src={imageUrl} alt={name} onError={() => setFailed(true)} className="w-full h-full object-cover" />
+  ) : (
+    <img src={defaultGroupAvatarImg} alt={name} className="w-full h-full object-cover" />
+  );
+};
 
 export const TasksView: React.FC<TasksViewProps> = ({
   user,
@@ -61,6 +84,103 @@ export const TasksView: React.FC<TasksViewProps> = ({
   // 🕒 ไม่ระบุเวลา (Anytime / Flex Task) — เหมือนกับตอนเพิ่มงานใหม่ใน CalendarView
   // (dueTime ว่าง '' และไม่มี endTime)
   const [editIsFlexTime, setEditIsFlexTime] = useState(false);
+
+  // ----------------------------------------------------
+  // 📤 แชร์งานลงกลุ่ม (Share Task to Group)
+  // ----------------------------------------------------
+  const currentUser = auth.currentUser;
+  const [myGroups, setMyGroups] = useState<ShareableGroup[]>([]);
+  const [sharingTask, setSharingTask] = useState<Task | null>(null);
+  const [selectedShareGroupId, setSelectedShareGroupId] = useState<string>('');
+  const [isSharingTask, setIsSharingTask] = useState(false);
+
+  // ดึงรายชื่อ "กลุ่มที่เราเป็นสมาชิกอยู่" แบบเรียลไทม์ ใช้แสดงในตัวเลือกตอนแชร์งาน
+  useEffect(() => {
+    if (!currentUser) {
+      setMyGroups([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'groups'),
+      where('memberIds', 'array-contains', currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedGroups: ShareableGroup[] = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data() as { name: string; imageUrl?: string };
+        return { id: docSnap.id, name: data.name, imageUrl: data.imageUrl };
+      });
+      setMyGroups(fetchedGroups);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
+
+  // แปลงหมวดหมู่ของงานส่วนตัว ให้ตรงกับหมวดหมู่ฝั่งงานกลุ่ม (Study/Work/Personal/Other)
+  const mapPersonalCategoryToGroup = (category?: string) => {
+    switch ((category || '').toUpperCase()) {
+      case 'STUDY': return 'Study';
+      case 'WORK': return 'Work';
+      case 'PERSONAL': return 'Personal';
+      default: return 'Other';
+    }
+  };
+
+  // แปลง eisenhowerQuadrant ของงานส่วนตัว ให้ตรงกับ Quadrant ฝั่งงานกลุ่ม
+  const mapPersonalQuadrantToGroup = (quadrant: EisenhowerQuadrant) => {
+    switch (quadrant) {
+      case 'now': return 'Do Now (Urgent & Imp';
+      case 'plan': return 'Schedule (Not Urgent & Imp)';
+      case 'quick': return 'Delegate (Urgent & Not Imp)';
+      case 'chill': return 'Eliminate (Not Urgent & Not Imp)';
+      default: return 'Do Now (Urgent & Imp';
+    }
+  };
+
+  const openShareModal = (task: Task) => {
+    setSharingTask(task);
+    setSelectedShareGroupId(myGroups[0]?.id || '');
+  };
+
+  const closeShareModal = () => {
+    setSharingTask(null);
+    setSelectedShareGroupId('');
+  };
+
+  const handleConfirmShareTask = async () => {
+    if (!sharingTask || !selectedShareGroupId || !currentUser) return;
+    setIsSharingTask(true);
+    try {
+      const noTimeLimit = !sharingTask.dueTime;
+      const durationMinutes = sharingTask.durationMinutes || 0;
+
+      await addDoc(collection(db, 'groupTasks'), {
+        groupId: selectedShareGroupId,
+        title: sharingTask.title,
+        description: sharingTask.description || '',
+        category: mapPersonalCategoryToGroup(sharingTask.category),
+        quadrant: mapPersonalQuadrantToGroup(sharingTask.eisenhowerQuadrant),
+        noTimeLimit,
+        startTime: noTimeLimit ? '' : sharingTask.dueTime,
+        endTime: noTimeLimit ? '' : (sharingTask.endTime || ''),
+        durationHrs: Math.floor(durationMinutes / 60),
+        durationMins: durationMinutes % 60,
+        location: sharingTask.location || '',
+        dueDate: sharingTask.dueDate,
+        sharedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
+        creatorId: currentUser.uid,
+        responses: {}
+      });
+
+      closeShareModal();
+    } catch (error) {
+      console.error('Error sharing task to group:', error);
+      alert('เกิดข้อผิดพลาดในการแชร์งานลงกลุ่ม กรุณาลองใหม่');
+    } finally {
+      setIsSharingTask(false);
+    }
+  };
 
   // 🔹 แปลงเวลา "HH:mm" <-> จำนวนนาที ใช้ผูก Start/End Time กับ Duration
   const timeToMinutes = (time: string) => {
@@ -393,6 +513,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         {task.title}
                       </h4>
                       <div className="flex items-center gap-1 shrink-0">
+                        {myGroups.length > 0 && (
+                          <button
+                            onClick={() => openShareModal(task)}
+                            className="text-gray-400 hover:text-green-600 p-0.5"
+                            title={user.language === 'th' ? 'แชร์งานลงกลุ่ม' : 'Share to group'}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditModal(task)}
                           className="text-gray-400 hover:text-blue-500 p-0.5"
@@ -623,6 +752,76 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 📤 Share Task to Group Modal */}
+      {sharingTask && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white doodle-border doodle-shadow-lg max-w-md w-full p-5 space-y-4">
+            <div className="flex justify-between items-center border-b-2 border-black pb-2">
+              <h3 className="font-extrabold text-lg font-['Bricolage_Grotesque'] flex items-center gap-2">
+                <Share2 className="w-5 h-5" />
+                {user.language === 'th' ? 'แชร์งานลงกลุ่ม' : 'Share task to group'}
+              </h3>
+              <button
+                type="button"
+                onClick={closeShareModal}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs font-bold text-gray-600">
+              "{sharingTask.title}"
+            </p>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {myGroups.map((group) => {
+                const isSelected = selectedShareGroupId === group.id;
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => setSelectedShareGroupId(group.id)}
+                    className={`w-full flex items-center gap-3 p-2.5 doodle-border-sm text-left transition-colors ${
+                      isSelected ? 'bg-accent' : 'bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-accent doodle-border-sm flex items-center justify-center font-black text-sm overflow-hidden shrink-0">
+                      <ShareGroupAvatar name={group.name} imageUrl={group.imageUrl} />
+                    </div>
+                    <span className="text-xs font-extrabold flex-1 min-w-0 truncate">
+                      {group.name}
+                    </span>
+                    {isSelected && <Check className="w-4 h-4 stroke-[3] shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={closeShareModal}
+                className="flex-1 py-2.5 bg-gray-100 doodle-border-sm font-bold doodle-btn"
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedShareGroupId || isSharingTask}
+                onClick={handleConfirmShareTask}
+                className="flex-1 py-2.5 bg-accent doodle-border-sm font-black doodle-btn disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <Users className="w-4 h-4" />
+                {isSharingTask
+                  ? (user.language === 'th' ? 'กำลังแชร์...' : 'Sharing...')
+                  : (user.language === 'th' ? 'แชร์งานนี้' : 'Share')}
+              </button>
+            </div>
           </div>
         </div>
       )}

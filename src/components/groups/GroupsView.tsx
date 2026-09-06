@@ -150,6 +150,24 @@ const MemberAvatar: React.FC<{ name: string; email: string; avatarUrl?: string }
   );
 };
 
+// รูปปกกลุ่ม — ถ้ากลุ่มยังไม่มีรูป (หรือรูปที่บันทึกไว้โหลดไม่ขึ้น เช่น ลิงก์เสีย/URL asset
+// รุ่นเก่าที่ใช้ไม่ได้แล้วหลัง build ใหม่) ให้ตกกลับไปแสดงภาพ default ของแอปแทนเสมอ
+// ใช้ onError จับกรณีโหลดไม่ขึ้นด้วย ไม่ใช่แค่เช็คว่าค่าว่างหรือไม่ เพื่อกันรูปหางสำหรับทุกคน
+const GroupAvatar: React.FC<{ name: string; imageUrl?: string; className?: string }> = ({
+  name,
+  imageUrl,
+  className = 'w-full h-full object-cover',
+}) => {
+  const [failed, setFailed] = useState(false);
+  const showCustom = !!imageUrl && imageUrl.trim() !== '' && !failed;
+
+  return showCustom ? (
+    <img src={imageUrl} alt={name} onError={() => setFailed(true)} className={className} />
+  ) : (
+    <img src={defaultGroupAvatarImg} alt={name} className={className} />
+  );
+};
+
 export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   // Main States
   const [groups, setGroups] = useState<Group[]>([]);
@@ -394,7 +412,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
       const newGroupData = {
         name: newGroupName,
         description: newGroupDesc,
-        imageUrl: newGroupImageUrl || defaultGroupAvatarImg,
+        imageUrl: newGroupImageUrl || '',
         membersCount: 1,
         pendingTasksCount: 0,
         memberIds: [currentUser.uid],
@@ -1031,11 +1049,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-accent doodle-border-sm flex items-center justify-center font-black font-['Bricolage_Grotesque'] text-lg shrink-0 overflow-hidden">
-                        {group.imageUrl ? (
-                          <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" />
-                        ) : (
-                          group.name.charAt(0).toUpperCase()
-                        )}
+                        <GroupAvatar name={group.name} imageUrl={group.imageUrl} />
                       </div>
                       <div>
                         <h3 className="font-extrabold text-base leading-snug font-['Bricolage_Grotesque'] group-hover:underline">
@@ -1094,11 +1108,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                 <div className="flex items-center gap-3">
                   <div className="relative shrink-0">
                     <div className="w-14 h-14 rounded-xl bg-accent doodle-border-sm flex items-center justify-center font-black font-['Bricolage_Grotesque'] text-xl overflow-hidden">
-                      {selectedGroup.imageUrl ? (
-                        <img src={selectedGroup.imageUrl} alt={selectedGroup.name} className="w-full h-full object-cover" />
-                      ) : (
-                        selectedGroup.name.charAt(0).toUpperCase()
-                      )}
+                      <GroupAvatar name={selectedGroup.name} imageUrl={selectedGroup.imageUrl} />
                     </div>
                     {isGroupOwner && (
                       <button
@@ -1996,15 +2006,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
             {/* ตัวอย่างภาพกลุ่ม: แสดงภาพที่เพิ่งเลือก (ยังไม่บันทึก) ถ้ามี ไม่งั้นแสดงภาพปัจจุบันของกลุ่ม */}
             <div className="flex flex-col items-center gap-1">
               <div className="w-20 h-20 rounded-xl bg-accent doodle-border-sm flex items-center justify-center font-black font-['Bricolage_Grotesque'] text-2xl overflow-hidden shrink-0">
-                {pendingGroupImageUrl || selectedGroup?.imageUrl ? (
-                  <img
-                    src={pendingGroupImageUrl || selectedGroup?.imageUrl}
-                    alt={selectedGroup?.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  selectedGroup?.name.charAt(0).toUpperCase()
-                )}
+                <GroupAvatar
+                  key={pendingGroupImageUrl || selectedGroup?.imageUrl || 'default'}
+                  name={selectedGroup?.name || ''}
+                  imageUrl={pendingGroupImageUrl || selectedGroup?.imageUrl}
+                />
               </div>
               {pendingGroupImageUrl && (
                 <span className="text-[10px] font-bold text-gray-500">
@@ -2073,7 +2079,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                 onClick={handleRemoveGroupImage}
                 className="w-full py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
               >
-                ลบภาพกลุ่ม (ใช้ตัวอักษรย่อแทน)
+                ลบภาพกลุ่ม (ใช้ภาพเริ่มต้นแทน)
               </button>
             )}
           </div>
