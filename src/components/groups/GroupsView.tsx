@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { toLocalDateStr, getLocalTodayStr } from '../../utils/date';
 import defaultGroupAvatarImg from '../../assets/group-default-avatar.jpg';
+import type { UserProfile } from '../../types';
+import { DEFAULT_AVATAR_URL } from '../../context/AppContext';
 
 // Import Firebase Config & Firestore Methods
 import { db, auth } from '../../lib/firebase';
@@ -42,6 +44,13 @@ import {
   onSnapshot 
 } from 'firebase/firestore';
 
+// ไม่บันทึกรูปโปรไฟล์ "ค่าเริ่มต้น" ลงในข้อมูลสมาชิกกลุ่ม เพราะเป็นไฟล์ asset ที่ผูกกับ
+// เวอร์ชันของแอป (ชื่อไฟล์อาจเปลี่ยนตอน build ใหม่) ถ้าเก็บ URL นี้ไว้ใน Firestore
+// พอ deploy เวอร์ชันใหม่ path เดิมอาจใช้ไม่ได้แล้วกลายเป็นรูปหาย ปล่อยว่างไว้ให้ UI
+// ไปแสดงเป็นตัวอักษรย่อแทนจะเสถียรกว่า ส่วนถ้า user อัปโหลดรูปเองจริง ๆ (URL อื่น) ค่อยเก็บ
+const resolveMemberAvatar = (url?: string) =>
+  url && url.trim() !== '' && url !== DEFAULT_AVATAR_URL ? url : '';
+
 // Interfaces
 interface User {
   id: string;
@@ -55,6 +64,7 @@ interface GroupMember {
   name: string;
   email: string;
   role: 'Owner' | 'Member';
+  avatarUrl?: string;
 }
 
 interface GroupTask {
@@ -85,6 +95,7 @@ interface Group {
   membersCount: number;
   pendingTasksCount: number;
   members: GroupMember[];
+  memberIds: string[];
   imageUrl?: string;
 }
 
@@ -107,7 +118,39 @@ const IconShield = ({ className = "w-3 h-3" }: { className?: string }) => (
   </svg>
 );
 
-export const GroupsView: React.FC = () => {
+interface GroupsViewProps {
+  user?: UserProfile;
+}
+
+// รูปโปรไฟล์สมาชิก — ถ้าโหลดรูปไม่ขึ้น (ลิงก์เสีย/ถูกลบ) ให้ตกกลับไปแสดงตัวอักษรย่อ
+// แทนที่จะปล่อยให้เห็นไอคอน "รูปหาย" ของเบราว์เซอร์
+const MemberAvatar: React.FC<{ name: string; email: string; avatarUrl?: string }> = ({
+  name,
+  email,
+  avatarUrl,
+}) => {
+  const [failed, setFailed] = useState(false);
+  const showImage = !!avatarUrl && avatarUrl.trim() !== '' && !failed;
+
+  if (showImage) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        onError={() => setFailed(true)}
+        className="w-9 h-9 rounded-lg object-cover doodle-border-sm bg-accent"
+      />
+    );
+  }
+
+  return (
+    <div className="w-9 h-9 rounded-lg bg-accent doodle-border-sm font-black flex items-center justify-center text-sm font-['Bricolage_Grotesque']">
+      {(name || email).charAt(0).toUpperCase()}
+    </div>
+  );
+};
+
+export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   // Main States
   const [groups, setGroups] = useState<Group[]>([]);
   const [tasks, setTasks] = useState<GroupTask[]>([]);
@@ -208,9 +251,19 @@ export const GroupsView: React.FC = () => {
 
   const currentUser = auth.currentUser;
 
-  // Real-time Fetch Groups
+  // Real-time Fetch Groups (เฉพาะกลุ่มที่เราเป็นสมาชิกอยู่เท่านั้น)
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'groups'), (snapshot) => {
+    if (!currentUser) {
+      setGroups([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'groups'),
+      where('memberIds', 'array-contains', currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedGroups: Group[] = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as Omit<Group, 'id'>),
@@ -228,7 +281,7 @@ export const GroupsView: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [selectedGroup?.id]);
+  }, [selectedGroup?.id, currentUser?.uid]);
 
   // Real-time Fetch Tasks
   useEffect(() => {
@@ -332,6 +385,10 @@ export const GroupsView: React.FC = () => {
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim()) return;
+    if (!currentUser) {
+      alert('กรุณาเข้าสู่ระบบก่อนสร้างกลุ่ม');
+      return;
+    }
 
     try {
       const newGroupData = {
@@ -340,11 +397,13 @@ export const GroupsView: React.FC = () => {
         imageUrl: newGroupImageUrl || defaultGroupAvatarImg,
         membersCount: 1,
         pendingTasksCount: 0,
+        memberIds: [currentUser.uid],
         members: [
           { 
-            id: currentUser?.uid || 'me', 
-            name: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'คุณ (Me)', 
-            email: currentUser?.email || 'you@example.com', 
+            id: currentUser.uid, 
+            name: user?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'คุณ (Me)', 
+            email: user?.email || currentUser?.email || 'you@example.com', 
+            avatarUrl: resolveMemberAvatar(user?.avatarUrl),
             role: 'Owner' 
           }
         ]
@@ -464,6 +523,7 @@ export const GroupsView: React.FC = () => {
       id: foundUser.id,
       name: foundUser.name,
       email: foundUser.email,
+      avatarUrl: resolveMemberAvatar(foundUser.avatarUrl),
       role: 'Member'
     };
 
@@ -471,7 +531,8 @@ export const GroupsView: React.FC = () => {
       const groupRef = doc(db, 'groups', selectedGroup.id);
       await updateDoc(groupRef, {
         membersCount: (selectedGroup.membersCount || 0) + 1,
-        members: arrayUnion(newMember)
+        members: arrayUnion(newMember),
+        memberIds: arrayUnion(foundUser.id)
       });
 
       setSearchEmail('');
@@ -1296,12 +1357,9 @@ export const GroupsView: React.FC = () => {
               {selectedGroup.members?.map((member) => (
                 <div key={member.id || member.email} className="p-3.5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-accent doodle-border-sm font-black flex items-center justify-center text-sm font-['Bricolage_Grotesque']">
-                      {(member.name || member.email).charAt(0).toUpperCase()}
-                    </div>
+                    <MemberAvatar name={member.name} email={member.email} avatarUrl={member.avatarUrl} />
                     <div>
                       <p className="text-xs font-extrabold text-black">{member.name}</p>
-                      <p className="text-[10px] font-semibold text-gray-500">{member.email}</p>
                     </div>
                   </div>
                   <span className={`text-[10px] font-black px-2.5 py-0.5 doodle-border-sm flex items-center gap-1 ${
