@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Task, UserProfile, Goal, EisenhowerQuadrant } from '../../types';
 import { useTranslation } from '../../utils/translations';
 import { getLocalTodayStr } from '../../utils/date';
-import { Check, Trash2, Clock, Pencil, X, MapPin, Share2, Users } from 'lucide-react';
+import { Check, Trash2, Clock, Pencil, X, MapPin, Share2, Users, CalendarDays } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { db, auth } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, addDoc } from 'firebase/firestore';
@@ -72,6 +72,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
   // Edit Task Modal State
   // ----------------------------------------------------
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  // ----------------------------------------------------
+  // 📅 ย้ายวันที่ของงาน (Move Task Date) — เปิด/ปิดช่องเลือกวันใหม่แบบเร็ว ๆ ในการ์ดงาน
+  // ----------------------------------------------------
+  const [movingDateTaskId, setMovingDateTaskId] = useState<string | null>(null);
+  const [moveDateValue, setMoveDateValue] = useState<string>('');
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editLocation, setEditLocation] = useState('');
@@ -214,6 +220,31 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
   const closeEditModal = () => {
     setEditingTask(null);
+  };
+
+  // 🔹 เปิด/ปิดช่องเลือกวันใหม่สำหรับงานที่ต้องการย้ายวัน
+  const openMoveDate = (task: Task) => {
+    setMovingDateTaskId((prev) => (prev === task.id ? null : task.id));
+    setMoveDateValue(task.dueDate);
+  };
+
+  const closeMoveDate = () => {
+    setMovingDateTaskId(null);
+    setMoveDateValue('');
+  };
+
+  // 🔹 ยืนยันการย้ายวันที่ของงาน
+  const handleConfirmMoveDate = (task: Task) => {
+    if (!moveDateValue || moveDateValue === task.dueDate) {
+      closeMoveDate();
+      return;
+    }
+    onUpdateTask({
+      ...task,
+      dueDate: moveDateValue,
+      updatedAt: new Date().toISOString()
+    });
+    closeMoveDate();
   };
 
   // 🔹 เปลี่ยน Start Time -> คำนวณ End Time ใหม่โดยคง Duration เดิมไว้
@@ -523,6 +554,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           </button>
                         )}
                         <button
+                          onClick={() => openMoveDate(task)}
+                          className={`p-0.5 ${movingDateTaskId === task.id ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'}`}
+                          title={user.language === 'th' ? 'ย้ายวัน' : 'Move date'}
+                        >
+                          <CalendarDays className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => openEditModal(task)}
                           className="text-gray-400 hover:text-blue-500 p-0.5"
                         >
@@ -536,6 +574,33 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* 📅 ช่องเลือกวันใหม่แบบเร็ว ๆ (เปิดเมื่อกดปุ่มย้ายวัน) */}
+                    {movingDateTaskId === task.id && (
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap bg-amber-50 doodle-border-sm px-2 py-1.5">
+                        <input
+                          type="date"
+                          value={moveDateValue}
+                          onChange={(e) => setMoveDateValue(e.target.value)}
+                          className="doodle-input text-[11px] font-bold px-2 py-1 flex-1 min-w-[120px]"
+                          aria-label={user.language === 'th' ? 'เลือกวันใหม่' : 'New date'}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmMoveDate(task)}
+                          className="bg-accent doodle-border-sm doodle-btn px-2.5 py-1 text-[10px] font-black"
+                        >
+                          {user.language === 'th' ? 'ย้าย' : 'Move'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={closeMoveDate}
+                          className="bg-white doodle-border-sm doodle-btn px-2 py-1 text-[10px] font-bold text-gray-500"
+                        >
+                          {t.cancel}
+                        </button>
+                      </div>
+                    )}
 
                     {task.description && (
                       <p className={`text-[11px] font-normal leading-snug line-clamp-2 mt-0.5 ${

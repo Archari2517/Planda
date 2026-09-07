@@ -21,7 +21,10 @@ import {
   CalendarDays,
   Upload,
   Link as LinkIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Megaphone,
+  BellRing,
+  CalendarClock
 } from 'lucide-react';
 import { toLocalDateStr, getLocalTodayStr } from '../../utils/date';
 import defaultGroupAvatarImg from '../../assets/group-default-avatar.jpg';
@@ -97,6 +100,23 @@ interface Group {
   members: GroupMember[];
   memberIds: string[];
   imageUrl?: string;
+}
+
+// 📢 ข่าวสาร/ประกาศในกลุ่ม — สมาชิกคนใดก็ได้พิมพ์เรื่องที่ต้องการแจ้ง พร้อมรายละเอียด
+// (วัน เวลา สถานที่) แล้วกด "แจ้งลงกลุ่ม" ให้สมาชิกคนอื่นเห็น แต่ละคนกด "รับทราบ" ได้
+// เพื่อย้ายข่าวจากลิสต์ "ข่าวใหม่" ไปเป็น "รับทราบแล้ว" ของตัวเอง (ไม่กระทบคนอื่น)
+interface GroupNews {
+  id: string;
+  groupId: string;
+  title: string;
+  description?: string;
+  location?: string;
+  newsDate?: string; // YYYY-MM-DD — วันที่ของเรื่องที่แจ้ง (ไม่บังคับ)
+  newsTime?: string; // "13:00" — เวลาของเรื่องที่แจ้ง (ไม่บังคับ)
+  postedBy: string; // ชื่อผู้แจ้งข่าว (แสดงผล)
+  creatorId: string;
+  acknowledgedBy?: string[]; // uid ของสมาชิกที่กด "รับทราบ" แล้ว
+  createdAt: string;
 }
 
 // Custom Inline SVG Icons
@@ -193,10 +213,26 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const [newGroupImageUrl, setNewGroupImageUrl] = useState('');
   const [tempNewGroupImageUrl, setTempNewGroupImageUrl] = useState('');
   const newGroupImageFileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<'tasks' | 'members'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'members' | 'news'>('tasks');
 
   // Filter งานในกลุ่มตามสถานะการตอบรับของฉัน: งานใหม่ / ยืนยันแล้ว / ปฏิเสธแล้ว
   const [taskStatusFilter, setTaskStatusFilter] = useState<'NEW' | 'ACCEPTED' | 'REJECTED'>('NEW');
+
+  // 📢 State ของฟีเจอร์ "แจ้งข่าว" ในกลุ่ม
+  const [news, setNews] = useState<GroupNews[]>([]);
+  const [showAddNewsModal, setShowAddNewsModal] = useState(false);
+  const [showEditNewsModal, setShowEditNewsModal] = useState(false);
+  const [editingNewsId, setEditingNewsId] = useState<string | null>(null);
+  const [newsTitle, setNewsTitle] = useState('');
+  const [newsDescription, setNewsDescription] = useState('');
+  const [newsLocation, setNewsLocation] = useState('');
+  const [newsTime, setNewsTime] = useState('');
+  // ใช้เฉพาะตอนแก้ไขข่าว — ให้แก้วันที่ของข่าวได้โดยตรงโดยไม่ต้องย้ายไปเลือกวันบนปฏิทินก่อน
+  const [editNewsDate, setEditNewsDate] = useState('');
+  // กรองข่าวตามสถานะ "การรับทราบ" ของฉัน: ข่าวใหม่ (ยังไม่กดรับทราบ) / รับทราบแล้ว
+  const [newsStatusFilter, setNewsStatusFilter] = useState<'NEW' | 'ACKNOWLEDGED'>('NEW');
+  // มุมมองรายการข่าว: ตามวันที่ที่เลือกบนปฏิทิน / ข่าวทั้งหมดในกลุ่มแบบไม่กำหนดวัน
+  const [newsViewMode, setNewsViewMode] = useState<'byDate' | 'all'>('byDate');
 
   // Calendar States — เลือกวันที่เพื่อดู/เพิ่มงานของกลุ่มในวันนั้นๆ
   const [selectedDate, setSelectedDate] = useState<string>(getLocalTodayStr());
@@ -317,6 +353,24 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     return () => unsubscribe();
   }, [selectedGroup]);
 
+  // Real-time Fetch News (ข่าวสาร/ประกาศในกลุ่ม)
+  useEffect(() => {
+    if (!selectedGroup) return;
+
+    const q = query(collection(db, 'groupNews'), where('groupId', '==', selectedGroup.id));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedNews: GroupNews[] = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<GroupNews, 'id'>),
+      }));
+      // เรียงข่าวล่าสุดไว้บนสุด
+      fetchedNews.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      setNews(fetchedNews);
+    });
+
+    return () => unsubscribe();
+  }, [selectedGroup]);
+
   // Search User
   useEffect(() => {
     if (!searchEmail.trim()) {
@@ -381,6 +435,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     setDurationHrs(0);
     setDurationMins(30);
     setLocation('');
+  };
+
+  const resetNewsForm = () => {
+    setNewsTitle('');
+    setNewsDescription('');
+    setNewsLocation('');
+    setNewsTime('');
+    setEditNewsDate('');
   };
 
   // เลือกภาพกลุ่มตอนสร้างกลุ่มใหม่ (อัปโหลดไฟล์ → แปลงเป็น base64)
@@ -458,6 +520,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         deleteDoc(doc(db, 'groupTasks', taskDoc.id))
       );
       await Promise.all(deletePromises);
+
+      // 1.5 ลบข่าวสารทั้งหมดที่เกี่ยวข้องกับกลุ่มนี้
+      const newsQuery = query(collection(db, 'groupNews'), where('groupId', '==', selectedGroup.id));
+      const newsSnapshot = await getDocs(newsQuery);
+      await Promise.all(newsSnapshot.docs.map((newsDoc) => deleteDoc(doc(db, 'groupNews', newsDoc.id))));
 
       // 2. ลบตัวกลุ่มออกจาก Firestore
       await deleteDoc(doc(db, 'groups', selectedGroup.id));
@@ -744,6 +811,92 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     }
   };
 
+  // 📢 แจ้งข่าวใหม่ลงกลุ่ม — สมาชิกคนไหนก็แจ้งได้ ไม่จำกัดเฉพาะ Owner
+  const handleCreateNews = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsTitle.trim() || !selectedGroup || !currentUser) return;
+
+    try {
+      await addDoc(collection(db, 'groupNews'), {
+        groupId: selectedGroup.id,
+        title: newsTitle.trim(),
+        description: newsDescription.trim(),
+        location: newsLocation.trim(),
+        newsDate: selectedDate,
+        newsTime,
+        postedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
+        creatorId: currentUser.uid,
+        acknowledgedBy: [],
+        createdAt: new Date().toISOString(),
+      });
+
+      resetNewsForm();
+      setShowAddNewsModal(false);
+    } catch (error) {
+      console.error('Error posting news:', error);
+      alert('เกิดข้อผิดพลาดในการแจ้งข่าว');
+    }
+  };
+
+  // เปิดฟอร์มแก้ไขข่าว — โหลดข้อมูลข่าวเดิมมาใส่ในฟอร์ม (แก้วันที่ได้โดยตรงในฟอร์มนี้)
+  const openEditNewsModal = (item: GroupNews) => {
+    setEditingNewsId(item.id);
+    setNewsTitle(item.title || '');
+    setNewsDescription(item.description || '');
+    setNewsLocation(item.location || '');
+    setNewsTime(item.newsTime || '');
+    setEditNewsDate(item.newsDate || selectedDate);
+    setShowEditNewsModal(true);
+  };
+
+  const handleEditNews = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNewsId || !newsTitle.trim()) return;
+
+    try {
+      await updateDoc(doc(db, 'groupNews', editingNewsId), {
+        title: newsTitle.trim(),
+        description: newsDescription.trim(),
+        location: newsLocation.trim(),
+        newsTime,
+        newsDate: editNewsDate,
+      });
+
+      resetNewsForm();
+      setEditingNewsId(null);
+      setShowEditNewsModal(false);
+    } catch (error) {
+      console.error('Error updating news:', error);
+      alert('เกิดข้อผิดพลาดในการแก้ไขข่าว');
+    }
+  };
+
+  // กด "รับทราบ" ข่าว — ย้ายข่าวนี้จาก "ข่าวใหม่" ไปเป็น "รับทราบแล้ว" เฉพาะฝั่งของเราเอง
+  const handleAcknowledgeNews = async (newsId: string) => {
+    if (!currentUser) {
+      alert('กรุณาล็อกอินก่อนรับทราบข่าว');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'groupNews', newsId), {
+        acknowledgedBy: arrayUnion(currentUser.uid),
+      });
+    } catch (error) {
+      console.error('Error acknowledging news:', error);
+      alert('ไม่สามารถอัปเดตสถานะรับทราบได้');
+    }
+  };
+
+  const handleDeleteNews = async (newsId: string) => {
+    if (!window.confirm('คุณต้องการลบข่าวนี้ใช่หรือไม่?')) return;
+    try {
+      await deleteDoc(doc(db, 'groupNews', newsId));
+    } catch (error) {
+      console.error('Error deleting news:', error);
+      alert('เกิดข้อผิดพลาดในการลบข่าว');
+    }
+  };
+
   // ตรวจสอบว่าผู้ใช้ปัจจุบันเป็น Owner ของกลุ่มหรือไม่
   // ⚠️ ใช้ uid (m.id) เป็นหลัก เพราะผู้ใช้แบบ Guest (Anonymous) จะไม่มี email จริง
   // ถ้าเทียบด้วย email อย่างเดียว ผู้สร้างกลุ่มที่เป็น Guest จะไม่ถูกจัดว่าเป็น Owner ของกลุ่มตัวเอง
@@ -768,12 +921,19 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const buildGridCell = (d: Date, isCurrentMonth: boolean) => {
     const dateStr = toLocalDateStr(d);
     const taskCount = tasks.filter((t) => t.dueDate === dateStr).length;
+    const dateNews = news.filter((n) => n.newsDate === dateStr);
+    const newsCount = dateNews.length;
+    // ทุกข่าวของวันนี้ถูก "ฉัน" กดรับทราบครบแล้วหรือยัง — ใช้ตัดสินสีจุดบนปฏิทิน (เขียว = รับทราบครบแล้ว)
+    const newsAllAcknowledged =
+      newsCount > 0 && dateNews.every((n) => !!currentUser && !!n.acknowledgedBy?.includes(currentUser.uid));
     return {
       dateStr,
       dayNum: d.getDate(),
       isCurrentMonth,
       isToday: dateStr === todayStr,
       taskCount,
+      newsCount,
+      newsAllAcknowledged,
     };
   };
 
@@ -804,6 +964,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     const dayName = d.toLocaleDateString('th-TH', { weekday: 'short' }).toUpperCase();
     const dayNum = d.getDate();
     const taskCount = tasks.filter((t) => t.dueDate === dateStr).length;
+    const dateNews = news.filter((n) => n.newsDate === dateStr);
+    const newsCount = dateNews.length;
+    const newsAllAcknowledged =
+      newsCount > 0 && dateNews.every((n) => !!currentUser && !!n.acknowledgedBy?.includes(currentUser.uid));
     return {
       dateStr,
       dayName,
@@ -811,6 +975,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
       isToday: dateStr === todayStr,
       isSelected: dateStr === selectedDate,
       taskCount,
+      newsCount,
+      newsAllAcknowledged,
     };
   });
 
@@ -830,9 +996,163 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     year: 'numeric',
   });
 
+  // 🗓️ ปฏิทินกลุ่ม (ใช้ร่วมกันทั้งแท็บ "งาน" และแท็บ "ข่าวสาร") — เลือกวันแล้วดู/เพิ่มข้อมูลของวันนั้นได้เลย
+  // itemLabel: 'งาน' หรือ 'ข่าว' — ใช้เลือกว่าจะโชว์จุดสีตามจำนวนงานหรือจำนวนข่าวของวันนั้น
+  const renderGroupCalendar = (itemLabel: 'งาน' | 'ข่าว') => {
+    const getCount = (cell: { taskCount: number; newsCount: number }) =>
+      itemLabel === 'งาน' ? cell.taskCount : cell.newsCount;
+
+    // สีจุด: ข่าว - เขียวถ้ารับทราบครบวันนั้นแล้ว ไม่งั้นแดง / งาน - แดงเสมอ
+    const getDotColorClass = (cell: { newsAllAcknowledged: boolean }) =>
+      itemLabel === 'ข่าว' && cell.newsAllAcknowledged ? 'bg-[#4CAF6D]' : 'bg-[#FF4D4D]';
+
+    return (
+      <div className="bg-white doodle-border doodle-shadow p-3.5 space-y-2.5">
+        <div className="flex items-center justify-between pb-2 border-b-2 border-black">
+          <button
+            onClick={() => setIsGroupCalendarCollapsed((v) => !v)}
+            className="flex items-center gap-2 flex-1 text-left"
+            title={isGroupCalendarCollapsed ? 'ขยายปฏิทิน' : 'พับปฏิทิน'}
+          >
+            <CalendarDays className="w-4 h-4 text-black shrink-0" />
+            <span className="font-extrabold text-sm font-['Bricolage_Grotesque'] capitalize">
+              {groupCalendarViewMode === 'month' ? monthYearLabel : selectedDateLabel}
+            </span>
+          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => setGroupCalendarViewMode((m) => (m === 'week' ? 'month' : 'week'))}
+              className={`p-1.5 doodle-border-sm doodle-btn transition-colors ${
+                groupCalendarViewMode === 'month' ? 'bg-accent' : 'bg-gray-100 hover:bg-gray-200'
+              }`}
+              title="สลับมุมมองรายสัปดาห์ / รายเดือน"
+            >
+              {groupCalendarViewMode === 'week' ? <LayoutGrid className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => setIsGroupCalendarCollapsed((v) => !v)}
+              className="p-1.5 bg-gray-100 hover:bg-gray-200 doodle-border-sm doodle-btn"
+              title={isGroupCalendarCollapsed ? 'ขยายปฏิทิน' : 'พับปฏิทิน'}
+            >
+              {isGroupCalendarCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {!isGroupCalendarCollapsed && (
+          <>
+            {groupCalendarViewMode === 'month' ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={handlePrevMonth}
+                    className="p-1.5 bg-gray-100 hover:bg-accent doodle-border-sm doodle-btn"
+                    title="เดือนก่อนหน้า"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="font-extrabold text-sm font-['Bricolage_Grotesque'] capitalize">
+                    {monthYearLabel}
+                  </span>
+                  <button
+                    onClick={handleNextMonth}
+                    className="p-1.5 bg-gray-100 hover:bg-accent doodle-border-sm doodle-btn"
+                    title="เดือนถัดไป"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-gray-600 uppercase">
+                  {dayHeaders.map((dh, i) => (
+                    <div key={i} className="py-1">{dh}</div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {monthGridDays.map((cell, idx) => {
+                    const isSelected = cell.dateStr === selectedDate;
+                    const count = getCount(cell);
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleSelectDay(cell.dateStr)}
+                        title={`เลือกวันนี้เพื่อดู/เพิ่ม${itemLabel}`}
+                        className={`min-h-[42px] p-1 rounded-lg doodle-border-sm flex flex-col items-center justify-between transition-all relative ${
+                          isSelected
+                            ? 'bg-accent doodle-shadow-sm font-black border-[2.5px] scale-105 z-10'
+                            : cell.isToday
+                            ? 'bg-[#E6D4F9] border-black font-extrabold'
+                            : cell.isCurrentMonth
+                            ? 'bg-white hover:bg-gray-100 font-bold text-black'
+                            : 'bg-gray-50 opacity-40 text-gray-400'
+                        }`}
+                      >
+                        <span className="text-xs">{cell.dayNum}</span>
+                        {count > 0 && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full mt-0.5 ${getDotColorClass(cell)}`}
+                            title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && cell.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="grid grid-cols-5 gap-2">
+                {groupDaysOfWeek.map((day) => {
+                  const count = getCount(day);
+                  return (
+                    <button
+                      key={day.dateStr}
+                      onClick={() => handleSelectDay(day.dateStr)}
+                      className={`flex flex-col items-center py-2.5 px-1 doodle-border-sm doodle-btn relative transition-all ${
+                        day.isSelected
+                          ? 'bg-accent doodle-shadow scale-105 z-10 border-[3px]'
+                          : 'bg-white doodle-shadow-sm hover:bg-[var(--paper-bg)]'
+                      }`}
+                    >
+                      <span className="text-[11px] font-extrabold uppercase tracking-tight text-gray-700">
+                        {day.dayName}
+                      </span>
+                      <span className={`text-lg font-black my-0.5 font-['Bricolage_Grotesque'] ${
+                        day.isSelected ? 'w-8 h-8 rounded-full border-2 border-black flex items-center justify-center bg-white text-black' : ''
+                      }`}>
+                        {day.dayNum}
+                      </span>
+                      {count > 0 && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full mt-1 ${getDotColorClass(day)}`}
+                          title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && day.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}`}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              onClick={() => handleSelectDay(getLocalTodayStr())}
+              className="w-full py-1.5 bg-gray-100 hover:bg-gray-200 doodle-border-sm text-[11px] font-black doodle-btn"
+            >
+              กลับไปวันนี้
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   // งานของวันที่เลือกไว้ / งานเก่าที่ยังไม่เคยระบุวันที่ (backward-compat)
   const tasksForSelectedDate = tasks.filter((t) => t.dueDate === selectedDate);
   const undatedTasks = tasks.filter((t) => !t.dueDate);
+
+  // ข่าวของวันที่เลือกไว้ / ข่าวเก่าที่ไม่ได้ระบุวันที่
+  const newsForSelectedDate = news.filter((n) => n.newsDate === selectedDate);
+  const undatedNews = news.filter((n) => !n.newsDate);
 
   // แยกงานตามสถานะการตอบรับของ "ฉัน" — งานใหม่ (ยังไม่ตอบ) / ยืนยันแล้ว / ปฏิเสธแล้ว
   const getMyStatus = (task: GroupTask): 'ACCEPTED' | 'REJECTED' | undefined =>
@@ -999,6 +1319,150 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     );
   };
 
+  // แยกข่าวตามสถานะ "การรับทราบ" ของฉัน — ข่าวใหม่ (ยังไม่กด) / รับทราบแล้ว
+  const isNewsAcknowledgedByMe = (item: GroupNews) =>
+    !!currentUser && !!item.acknowledgedBy?.includes(currentUser.uid);
+
+  // จำนวนข่าวใหม่ทั้งหมดในกลุ่ม (ไม่จำกัดวันที่) — ใช้โชว์ badge แจ้งเตือนบนแท็บ
+  const newNewsList = news.filter((n) => !isNewsAcknowledgedByMe(n));
+  const acknowledgedNewsList = news.filter((n) => isNewsAcknowledgedByMe(n));
+
+  // ใช้ตอนดูโหมด "ข่าวทั้งหมด" (ไม่กำหนดวัน) — เรียงข่าวล่าสุดไว้บนสุด กรองแค่ตามสถานะรับทราบ
+  const displayedAllNewsList = newsStatusFilter === 'NEW' ? newNewsList : acknowledgedNewsList;
+
+  // แยกข่าว "ตามวันที่ที่เลือกในปฏิทิน" ตามสถานะรับทราบของฉัน (เหมือนหน้างานในกลุ่ม)
+  const newsByStatus = (list: GroupNews[]) => ({
+    newItems: list.filter((n) => !isNewsAcknowledgedByMe(n)),
+    acknowledgedItems: list.filter((n) => isNewsAcknowledgedByMe(n)),
+  });
+
+  const selectedDateNewsStatusGroups = newsByStatus(newsForSelectedDate);
+  const undatedNewsStatusGroups = newsByStatus(undatedNews);
+
+  const filteredNewsForSelectedDate =
+    newsStatusFilter === 'NEW'
+      ? selectedDateNewsStatusGroups.newItems
+      : selectedDateNewsStatusGroups.acknowledgedItems;
+
+  const filteredUndatedNews =
+    newsStatusFilter === 'NEW'
+      ? undatedNewsStatusGroups.newItems
+      : undatedNewsStatusGroups.acknowledgedItems;
+
+  const newsStatusTabs: Array<{ key: 'NEW' | 'ACKNOWLEDGED'; label: string; icon: string; count: number }> = [
+    {
+      key: 'NEW',
+      label: 'ข่าวใหม่',
+      icon: '📢',
+      count: newsViewMode === 'all' ? newNewsList.length : selectedDateNewsStatusGroups.newItems.length,
+    },
+    {
+      key: 'ACKNOWLEDGED',
+      label: 'รับทราบแล้ว',
+      icon: '✅',
+      count: newsViewMode === 'all' ? acknowledgedNewsList.length : selectedDateNewsStatusGroups.acknowledgedItems.length,
+    },
+  ];
+
+  const renderNewsStatusTabBar = () => (
+    <div className="flex bg-white doodle-border-sm p-1 doodle-shadow-sm gap-1">
+      {newsStatusTabs.map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setNewsStatusFilter(tab.key)}
+          className={`flex-1 py-2 px-1 text-xs font-black rounded-lg transition-all doodle-btn ${
+            newsStatusFilter === tab.key
+              ? 'bg-[var(--ink-solid)] text-white shadow-[2px_2px_0px_var(--ink-black)]'
+              : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          {tab.icon} {tab.label} ({tab.count})
+        </button>
+      ))}
+    </div>
+  );
+
+  // การ์ดข่าว 1 ใบ
+  const renderNewsCard = (item: GroupNews) => {
+    const acknowledged = isNewsAcknowledgedByMe(item);
+    const isCreator = currentUser?.uid === item.creatorId;
+    const ackCount = item.acknowledgedBy?.length || 0;
+    const newsDateLabel = item.newsDate
+      ? new Date(item.newsDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+
+    return (
+      <div key={item.id} className="bg-white doodle-border doodle-shadow p-4 space-y-3">
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h4 className="font-extrabold text-base text-[var(--text-main)] leading-snug flex items-center gap-1.5">
+              <Megaphone className="w-4 h-4 text-black shrink-0" />
+              {item.title}
+            </h4>
+          </div>
+
+          {item.description && (
+            <p className="text-xs font-medium text-gray-600 mb-2 whitespace-pre-line">{item.description}</p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-gray-500">
+            {(newsDateLabel || item.newsTime) && (
+              <span className="flex items-center gap-1">
+                <CalendarClock className="w-3.5 h-3.5" />
+                {newsDateLabel}
+                {newsDateLabel && item.newsTime ? ' • ' : ''}
+                {item.newsTime}
+              </span>
+            )}
+            {item.location && (
+              <span className="flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5" /> {item.location}
+              </span>
+            )}
+            <span>• โดย: {item.postedBy}</span>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {isCreator && (
+              <>
+                <button
+                  onClick={() => openEditNewsModal(item)}
+                  title="แก้ไขข่าวนี้"
+                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDeleteNews(item.id)}
+                  title="ลบข่าวนี้"
+                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
+            )}
+            <span className="text-[10px] font-bold text-gray-400">รับทราบแล้ว {ackCount} คน</span>
+          </div>
+
+          {!acknowledged ? (
+            <button
+              onClick={() => handleAcknowledgeNews(item.id)}
+              className="flex items-center gap-1 bg-[#9DD9D2] hover:bg-teal-300 px-3 py-1.5 doodle-border-sm text-xs font-black doodle-btn"
+            >
+              <IconCheck className="w-3.5 h-3.5" /> รับทราบ
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-black bg-[#9DD9D2] text-black px-2.5 py-1 doodle-border-sm">
+              <IconCheck className="w-3.5 h-3.5" /> คุณรับทราบแล้ว
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="pb-24 pt-3 px-4 max-w-md mx-auto space-y-4 font-sans text-gray-800">
       
@@ -1145,20 +1609,35 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t-2 border-black">
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t-2 border-black">
               <button
                 onClick={() => setActiveTab('tasks')}
-                className={`py-2 text-xs font-black text-center doodle-border-sm transition-all ${
+                className={`py-2 text-[11px] font-black text-center doodle-border-sm transition-all ${
                   activeTab === 'tasks'
                     ? 'bg-accent doodle-shadow-sm'
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                งานในกลุ่ม ({tasks.length})
+                งาน ({tasks.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('news')}
+                className={`py-2 text-[11px] font-black text-center doodle-border-sm transition-all relative ${
+                  activeTab === 'news'
+                    ? 'bg-accent doodle-shadow-sm'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                ข่าวสาร ({news.length})
+                {newNewsList.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[#FF4D4D] text-white text-[9px] font-black flex items-center justify-center border border-black">
+                    {newNewsList.length}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setActiveTab('members')}
-                className={`py-2 text-xs font-black text-center doodle-border-sm transition-all ${
+                className={`py-2 text-[11px] font-black text-center doodle-border-sm transition-all ${
                   activeTab === 'members'
                     ? 'bg-accent doodle-shadow-sm'
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
@@ -1172,135 +1651,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
           {activeTab === 'tasks' && (
             <div className="space-y-3">
               {/* 🗓️ ปฏิทินกลุ่ม — เลือกวันแล้วกดเพิ่มงานในวันนั้นได้เลย (พับ/ขยาย และสลับรายสัปดาห์/รายเดือนได้) */}
-              <div className="bg-white doodle-border doodle-shadow p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between pb-2 border-b-2 border-black">
-                  <button
-                    onClick={() => setIsGroupCalendarCollapsed((v) => !v)}
-                    className="flex items-center gap-2 flex-1 text-left"
-                    title={isGroupCalendarCollapsed ? 'ขยายปฏิทิน' : 'พับปฏิทิน'}
-                  >
-                    <CalendarDays className="w-4 h-4 text-black shrink-0" />
-                    <span className="font-extrabold text-sm font-['Bricolage_Grotesque'] capitalize">
-                      {groupCalendarViewMode === 'month' ? monthYearLabel : selectedDateLabel}
-                    </span>
-                  </button>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => setGroupCalendarViewMode((m) => (m === 'week' ? 'month' : 'week'))}
-                      className={`p-1.5 doodle-border-sm doodle-btn transition-colors ${
-                        groupCalendarViewMode === 'month' ? 'bg-accent' : 'bg-gray-100 hover:bg-gray-200'
-                      }`}
-                      title="สลับมุมมองรายสัปดาห์ / รายเดือน"
-                    >
-                      {groupCalendarViewMode === 'week' ? <LayoutGrid className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-                    </button>
-                    <button
-                      onClick={() => setIsGroupCalendarCollapsed((v) => !v)}
-                      className="p-1.5 bg-gray-100 hover:bg-gray-200 doodle-border-sm doodle-btn"
-                      title={isGroupCalendarCollapsed ? 'ขยายปฏิทิน' : 'พับปฏิทิน'}
-                    >
-                      {isGroupCalendarCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {!isGroupCalendarCollapsed && (
-                  <>
-                    {groupCalendarViewMode === 'month' ? (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <button
-                            onClick={handlePrevMonth}
-                            className="p-1.5 bg-gray-100 hover:bg-accent doodle-border-sm doodle-btn"
-                            title="เดือนก่อนหน้า"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <span className="font-extrabold text-sm font-['Bricolage_Grotesque'] capitalize">
-                            {monthYearLabel}
-                          </span>
-                          <button
-                            onClick={handleNextMonth}
-                            className="p-1.5 bg-gray-100 hover:bg-accent doodle-border-sm doodle-btn"
-                            title="เดือนถัดไป"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-gray-600 uppercase">
-                          {dayHeaders.map((dh, i) => (
-                            <div key={i} className="py-1">{dh}</div>
-                          ))}
-                        </div>
-
-                        <div className="grid grid-cols-7 gap-1">
-                          {monthGridDays.map((cell, idx) => {
-                            const isSelected = cell.dateStr === selectedDate;
-                            return (
-                              <button
-                                key={idx}
-                                onClick={() => handleSelectDay(cell.dateStr)}
-                                title="เลือกวันนี้เพื่อดู/เพิ่มงาน"
-                                className={`min-h-[42px] p-1 rounded-lg doodle-border-sm flex flex-col items-center justify-between transition-all relative ${
-                                  isSelected
-                                    ? 'bg-accent doodle-shadow-sm font-black border-[2.5px] scale-105 z-10'
-                                    : cell.isToday
-                                    ? 'bg-[#E6D4F9] border-black font-extrabold'
-                                    : cell.isCurrentMonth
-                                    ? 'bg-white hover:bg-gray-100 font-bold text-black'
-                                    : 'bg-gray-50 opacity-40 text-gray-400'
-                                }`}
-                              >
-                                <span className="text-xs">{cell.dayNum}</span>
-                                {cell.taskCount > 0 && (
-                                  <span
-                                    className="w-1.5 h-1.5 rounded-full bg-[#FF4D4D] mt-0.5"
-                                    title={`${cell.taskCount} งาน`}
-                                  />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="grid grid-cols-5 gap-2">
-                        {groupDaysOfWeek.map((day) => (
-                          <button
-                            key={day.dateStr}
-                            onClick={() => handleSelectDay(day.dateStr)}
-                            className={`flex flex-col items-center py-2.5 px-1 doodle-border-sm doodle-btn relative transition-all ${
-                              day.isSelected
-                                ? 'bg-accent doodle-shadow scale-105 z-10 border-[3px]'
-                                : 'bg-white doodle-shadow-sm hover:bg-[var(--paper-bg)]'
-                            }`}
-                          >
-                            <span className="text-[11px] font-extrabold uppercase tracking-tight text-gray-700">
-                              {day.dayName}
-                            </span>
-                            <span className={`text-lg font-black my-0.5 font-['Bricolage_Grotesque'] ${
-                              day.isSelected ? 'w-8 h-8 rounded-full border-2 border-black flex items-center justify-center bg-white text-black' : ''
-                            }`}>
-                              {day.dayNum}
-                            </span>
-                            {day.taskCount > 0 && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#FF4D4D] mt-1" title={`${day.taskCount} งาน`} />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => handleSelectDay(getLocalTodayStr())}
-                      className="w-full py-1.5 bg-gray-100 hover:bg-gray-200 doodle-border-sm text-[11px] font-black doodle-btn"
-                    >
-                      กลับไปวันนี้
-                    </button>
-                  </>
-                )}
-              </div>
+              {renderGroupCalendar('งาน')}
 
               {/* งานของวันที่เลือกไว้ */}
               <div className="flex justify-between items-center">
@@ -1358,6 +1709,112 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                   </h3>
                   {filteredUndatedTasks.map(renderTaskCard)}
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'news' && (
+            <div className="space-y-3">
+              {/* สลับมุมมอง: ดูตามวันที่บนปฏิทิน / ดูข่าวทั้งหมดแบบไม่กำหนดวัน */}
+              <div className="flex bg-white doodle-border-sm p-1 doodle-shadow-sm gap-1">
+                <button
+                  onClick={() => setNewsViewMode('byDate')}
+                  className={`flex-1 py-2 px-1 text-xs font-black rounded-lg transition-all doodle-btn flex items-center justify-center gap-1 ${
+                    newsViewMode === 'byDate'
+                      ? 'bg-[var(--ink-solid)] text-white shadow-[2px_2px_0px_var(--ink-black)]'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" /> ตามวันที่
+                </button>
+                <button
+                  onClick={() => setNewsViewMode('all')}
+                  className={`flex-1 py-2 px-1 text-xs font-black rounded-lg transition-all doodle-btn flex items-center justify-center gap-1 ${
+                    newsViewMode === 'all'
+                      ? 'bg-[var(--ink-solid)] text-white shadow-[2px_2px_0px_var(--ink-black)]'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" /> ข่าวทั้งหมด ({news.length})
+                </button>
+              </div>
+
+              {/* 🗓️ ปฏิทินกลุ่ม — เลือกวันแล้วกดแจ้งข่าวสำหรับวันนั้นได้เลย (เหมือนหน้างานในกลุ่ม) */}
+              {newsViewMode === 'byDate' && renderGroupCalendar('ข่าว')}
+
+              {/* หัวข้อรายการข่าว */}
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque']">
+                    {newsViewMode === 'byDate' ? `ข่าววันที่ ${selectedDateLabel}` : 'ข่าวทั้งหมดในกลุ่ม'}
+                  </h3>
+                  <span className="text-[11px] font-bold text-gray-500">
+                    {newsViewMode === 'byDate' ? `${newsForSelectedDate.length} ข่าว` : `${news.length} ข่าวทั้งหมด`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowAddNewsModal(true)}
+                  className="bg-accent hover:bg-yellow-400 text-black px-3 py-1.5 doodle-border-sm text-xs font-black doodle-btn flex items-center gap-1 shadow-sm"
+                >
+                  <BellRing className="w-3.5 h-3.5" />
+                  แจ้งข่าว
+                </button>
+              </div>
+
+              {/* แถบแท็บกรองข่าวตามสถานะ: ข่าวใหม่ / รับทราบแล้ว */}
+              {renderNewsStatusTabBar()}
+
+              {newsViewMode === 'all' ? (
+                displayedAllNewsList.length === 0 ? (
+                  <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
+                    <span className="text-3xl">{newsStatusFilter === 'NEW' ? '📢' : '✅'}</span>
+                    <p className="text-xs font-bold text-gray-600">
+                      {news.length === 0
+                        ? 'ยังไม่มีข่าวสารในกลุ่มนี้'
+                        : `ไม่มีข่าว${newsStatusFilter === 'NEW' ? 'ใหม่' : 'ที่รับทราบแล้ว'}`}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {displayedAllNewsList.map(renderNewsCard)}
+                  </div>
+                )
+              ) : (
+                <>
+                  {newsForSelectedDate.length === 0 ? (
+                    <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-2">
+                      <span className="text-3xl">📢</span>
+                      <p className="text-xs font-bold text-gray-600">ยังไม่มีข่าวในวันที่เลือกนี้</p>
+                      <button
+                        onClick={() => setShowAddNewsModal(true)}
+                        className="mt-2 bg-[var(--ink-solid)] text-white px-3 py-1.5 rounded-xl text-xs font-bold doodle-btn inline-flex items-center gap-1"
+                      >
+                        <BellRing className="w-3 h-3 text-[var(--accent-color)]" /> แจ้งข่าวในวันนี้
+                      </button>
+                    </div>
+                  ) : filteredNewsForSelectedDate.length === 0 ? (
+                    <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
+                      <span className="text-3xl">{newsStatusFilter === 'NEW' ? '📢' : '✅'}</span>
+                      <p className="text-xs font-bold text-gray-600">
+                        ไม่มีข่าว{newsStatusFilter === 'NEW' ? 'ใหม่' : 'ที่รับทราบแล้ว'}ในวันนี้
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredNewsForSelectedDate.map(renderNewsCard)}
+                    </div>
+                  )}
+
+                  {/* ข่าวเก่าที่ไม่ได้ระบุวันที่ — แสดงแยกไว้ไม่ให้หายไป */}
+                  {undatedNews.length > 0 && filteredUndatedNews.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque'] text-gray-500">
+                        ข่าวที่ไม่ระบุวันที่ ({filteredUndatedNews.length})
+                      </h3>
+                      {filteredUndatedNews.map(renderNewsCard)}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1706,6 +2163,204 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                   className="flex-1 py-2.5 bg-accent border-2 border-black rounded-xl font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-0.5 transition-all"
                 >
                   บันทึกงาน
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: แจ้งข่าวใหม่ลงกลุ่ม */}
+      {showAddNewsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border-2 border-black p-5 max-w-sm w-full space-y-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] max-h-[90vh] overflow-y-auto">
+
+            <div className="flex justify-between items-center border-b-2 border-black pb-2">
+              <h3 className="font-bold text-base text-gray-900 flex items-center gap-1.5">
+                <Megaphone className="w-4 h-4" /> แจ้งข่าวใหม่
+              </h3>
+              <button
+                onClick={() => {
+                  resetNewsForm();
+                  setShowAddNewsModal(false);
+                }}
+                className="p-1 text-gray-500 hover:text-black"
+              >
+                <IconClose className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNews} className="space-y-3 text-xs font-bold text-gray-700">
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">เรื่องที่ต้องการแจ้ง *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="เช่น ประชุมกลุ่มด่วน, ยกเลิกนัดพรุ่งนี้"
+                  value={newsTitle}
+                  onChange={(e) => setNewsTitle(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">รายละเอียด (ไม่บังคับ)</label>
+                <textarea
+                  placeholder="เพิ่มรายละเอียดของข่าวนี้..."
+                  value={newsDescription}
+                  onChange={(e) => setNewsDescription(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none font-normal resize-none"
+                />
+              </div>
+
+              {/* 📅 วันที่ของข่าวนี้ = วันที่เลือกไว้บนปฏิทินกลุ่ม (เปลี่ยนได้โดยปิด modal แล้วเลือกวันอื่นบนปฏิทิน) */}
+              <div className="flex items-center gap-2 border-2 border-black rounded-xl px-3 py-2.5 bg-gray-50">
+                <CalendarClock className="w-4 h-4 text-black shrink-0" />
+                <span className="font-bold text-gray-800">แจ้งข่าวสำหรับวันที่ {selectedDateLabel}</span>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">เวลา (ไม่บังคับ)</label>
+                <input
+                  type="time"
+                  value={newsTime}
+                  onChange={(e) => setNewsTime(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-center font-extrabold text-sm text-gray-800 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">สถานที่ (ไม่บังคับ)</label>
+                <input
+                  type="text"
+                  placeholder="เช่น ห้องสมุด ชั้น 3"
+                  value={newsLocation}
+                  onChange={(e) => setNewsLocation(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none font-normal"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetNewsForm();
+                    setShowAddNewsModal(false);
+                  }}
+                  className="flex-1 py-2.5 bg-gray-100 border-2 border-black rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-accent border-2 border-black rounded-xl font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-0.5 transition-all flex items-center justify-center gap-1"
+                >
+                  <BellRing className="w-4 h-4" /> แจ้งลงกลุ่ม
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: แก้ไขข่าว */}
+      {showEditNewsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border-2 border-black p-5 max-w-sm w-full space-y-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] max-h-[90vh] overflow-y-auto">
+
+            <div className="flex justify-between items-center border-b-2 border-black pb-2">
+              <h3 className="font-bold text-base text-gray-900 flex items-center gap-1.5">
+                <Pencil className="w-4 h-4" /> แก้ไขข่าว
+              </h3>
+              <button
+                onClick={() => {
+                  resetNewsForm();
+                  setEditingNewsId(null);
+                  setShowEditNewsModal(false);
+                }}
+                className="p-1 text-gray-500 hover:text-black"
+              >
+                <IconClose className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditNews} className="space-y-3 text-xs font-bold text-gray-700">
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">เรื่องที่ต้องการแจ้ง *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="เช่น ประชุมกลุ่มด่วน, ยกเลิกนัดพรุ่งนี้"
+                  value={newsTitle}
+                  onChange={(e) => setNewsTitle(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">รายละเอียด (ไม่บังคับ)</label>
+                <textarea
+                  placeholder="เพิ่มรายละเอียดของข่าวนี้..."
+                  value={newsDescription}
+                  onChange={(e) => setNewsDescription(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none font-normal resize-none"
+                />
+              </div>
+
+              {/* แก้ไขข่าวแก้วันที่ได้โดยตรง (ต่างจากตอนแจ้งข่าวใหม่ที่ใช้วันจากปฏิทินที่เลือกไว้) */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block mb-1 font-bold text-gray-800">วันที่ (ไม่บังคับ)</label>
+                  <input
+                    type="date"
+                    value={editNewsDate}
+                    onChange={(e) => setEditNewsDate(e.target.value)}
+                    className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-bold text-gray-800">เวลา (ไม่บังคับ)</label>
+                  <input
+                    type="time"
+                    value={newsTime}
+                    onChange={(e) => setNewsTime(e.target.value)}
+                    className="w-full px-3 py-2 border-2 border-black rounded-xl text-center font-extrabold text-sm text-gray-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">สถานที่ (ไม่บังคับ)</label>
+                <input
+                  type="text"
+                  placeholder="เช่น ห้องสมุด ชั้น 3"
+                  value={newsLocation}
+                  onChange={(e) => setNewsLocation(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none font-normal"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetNewsForm();
+                    setEditingNewsId(null);
+                    setShowEditNewsModal(false);
+                  }}
+                  className="flex-1 py-2.5 bg-gray-100 border-2 border-black rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-accent border-2 border-black rounded-xl font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-0.5 transition-all flex items-center justify-center gap-1"
+                >
+                  <Pencil className="w-4 h-4" /> บันทึกการแก้ไข
                 </button>
               </div>
             </form>
