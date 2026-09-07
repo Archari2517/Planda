@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Task, UserProfile, Goal, EisenhowerQuadrant } from '../../types';
 import { useTranslation } from '../../utils/translations';
-import { getLocalTodayStr } from '../../utils/date';
-import { Check, Trash2, Clock, Pencil, X, MapPin, Share2, Users, CalendarDays } from 'lucide-react';
+import { getLocalTodayStr, daysUntil, getDeadlineUrgency, formatDeadlineCountdown } from '../../utils/date';
+import { Check, Trash2, Clock, Pencil, X, MapPin, Share2, Users, CalendarDays, Timer } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { db, auth } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, addDoc } from 'firebase/firestore';
@@ -140,6 +140,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       case 'plan': return 'Schedule (Not Urgent & Imp)';
       case 'quick': return 'Delegate (Urgent & Not Imp)';
       case 'chill': return 'Eliminate (Not Urgent & Not Imp)';
+      case 'deadline': return 'Deadline (มีกำหนดส่ง)';
       default: return 'Do Now (Urgent & Imp';
     }
   };
@@ -329,6 +330,19 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   ];
 
+  // ⏰ งานที่มีกำหนดส่ง (Deadline Task) — แยกออกจาก 4 Quadrant ปกติ แสดงเป็นการ์ดพิเศษ
+  // เต็มความกว้าง ด้านล่างกริด เพราะสิ่งที่สำคัญที่สุดคือ "เหลือเวลาอีกกี่วัน" ไม่ใช่ Quadrant
+  const deadlineQuadrant = {
+    id: 'deadline' as EisenhowerQuadrant,
+    title: 'งานที่มีกำหนดส่ง',
+    sub: 'นับถอยหลังถึงวันครบกำหนด',
+    icon: '⏰'
+  };
+
+  // งานกำหนดส่งที่ยังไม่เสร็จทั้งหมด (ไม่กรองตาม dateFilterMode เพราะกำหนดส่งอาจอยู่ในอนาคต)
+  const pendingDeadlineTasks = tasks.filter((t) => t.eisenhowerQuadrant === 'deadline' && !t.completed);
+  const overdueDeadlineCount = pendingDeadlineTasks.filter((t) => daysUntil(t.dueDate) < 0).length;
+
   // หมวดหมู่ที่มีอยู่จริงใน Quadrant ปัจจุบัน ใช้เป็นตัวเลือกในตัวกรองหมวดหมู่
   const categoryOptions = Array.from(
     new Set(
@@ -348,13 +362,18 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const effectiveRangeEnd = customStartDate <= customEndDate ? customEndDate : customStartDate;
 
   // กรองตาม Quadrant ที่เลือก + หมวดหมู่ + ตัวกรองวันที่ (ทั้งหมด / วันนี้ / ช่วงวันที่ระบุเอง)
-  const filteredTasks = tasks.filter((task) => {
+  const filteredTasksUnsorted = tasks.filter((task) => {
     if (task.eisenhowerQuadrant !== activeQuadrant) return false;
     if (effectiveCategoryFilter !== 'all' && task.category !== effectiveCategoryFilter) return false;
     if (dateFilterMode === 'today') return task.dueDate === todayStr;
     if (dateFilterMode === 'custom') return task.dueDate >= effectiveRangeStart && task.dueDate <= effectiveRangeEnd;
     return true; // 'all' ➔ ไม่กรองตามวันที่
   });
+
+  // 🔽 เรียงงานที่มีกำหนดส่งตาม "ใกล้ครบกำหนดที่สุดก่อน" เพื่อให้เห็นงานเร่งด่วนอยู่บนสุด
+  const filteredTasks = activeQuadrant === 'deadline'
+    ? [...filteredTasksUnsorted].sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    : filteredTasksUnsorted;
 
   // เป้าหมายที่ถูกเลือก (ปักหมุด) ให้แสดงบนหน้านี้
   const featuredGoal = goals.find((g) => g.isPinned && !g.completed);
@@ -419,21 +438,21 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 setActiveQuadrant(q.id);
                 setCategoryFilter('all'); // สลับ Quadrant ➔ รีเซ็ตตัวกรองหมวดหมู่ (หมวดหมู่ผูกกับ Quadrant)
               }}
-              className={`doodle-border doodle-shadow doodle-btn p-3 relative flex flex-col justify-between h-32 text-left transition-colors ${
+              className={`doodle-border doodle-shadow doodle-btn p-2.5 relative flex flex-col justify-between gap-1.5 text-left transition-colors ${
                 isSelected ? 'bg-accent' : 'bg-white'
               }`}
             >
               <div className="flex justify-between items-start w-full">
-                <span className="text-lg">{q.icon}</span>
-                <span className="border border-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold bg-white">
+                <span className="text-base">{q.icon}</span>
+                <span className="border border-black rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold bg-white">
                   {count}
                 </span>
               </div>
               <div>
-                <h3 className="font-bold text-xs leading-tight text-[var(--text-main)]">
+                <h3 className="font-bold text-[11px] leading-tight text-[var(--text-main)]">
                   {q.title}
                 </h3>
-                <p className={`text-[10px] mt-1 font-medium leading-tight ${
+                <p className={`text-[9px] mt-0.5 font-medium leading-tight ${
                   isSelected ? 'text-gray-800' : 'text-gray-400'
                 }`}>
                   {q.sub}
@@ -443,6 +462,43 @@ export const TasksView: React.FC<TasksViewProps> = ({
           );
         })}
       </div>
+
+      {/* ⏰ Deadline Task Tile — การ์ดพิเศษเต็มความกว้าง แยกจากกริด Quadrant 2x2 */}
+      <button
+        onClick={() => {
+          setActiveQuadrant('deadline');
+          setCategoryFilter('all');
+          // งานกำหนดส่งมักอยู่ในอนาคต ไม่ใช่วันนี้เสมอไป ➔ สลับตัวกรองวันที่เป็น "ทั้งหมด" ให้อัตโนมัติ
+          setDateFilterMode('all');
+        }}
+        className={`w-full doodle-border doodle-shadow doodle-btn p-3.5 flex items-center gap-3 text-left transition-colors ${
+          activeQuadrant === 'deadline'
+            ? 'bg-[#FF9F9F]'
+            : overdueDeadlineCount > 0
+            ? 'bg-[#FFE0E0]'
+            : 'bg-white'
+        }`}
+      >
+        <span className="text-2xl shrink-0">{deadlineQuadrant.icon}</span>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-xs leading-tight text-[var(--text-main)]">
+            {deadlineQuadrant.title}
+          </h3>
+          <p className={`text-[10px] mt-0.5 font-medium leading-tight ${
+            activeQuadrant === 'deadline' ? 'text-gray-800' : 'text-gray-400'
+          }`}>
+            {deadlineQuadrant.sub}
+          </p>
+        </div>
+        {overdueDeadlineCount > 0 && (
+          <span className="text-[10px] font-black bg-[#FF4D4D] text-white px-2 py-0.5 rounded-full border border-black shrink-0">
+            {user.language === 'th' ? `เลยกำหนด ${overdueDeadlineCount}` : `${overdueDeadlineCount} overdue`}
+          </span>
+        )}
+        <span className="border border-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold bg-white shrink-0">
+          {pendingDeadlineTasks.length}
+        </span>
+      </button>
 
       {/* Task List Header + Filters (หมวดหมู่ / ทั้งหมด-วันนี้-เลือกวันที่) */}
       <div className="pt-2 flex items-center justify-between gap-2 flex-wrap">
@@ -519,12 +575,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
         ) : (
           filteredTasks.map((task) => {
             const linkedGoal = goals.find(g => g.id === task.goalId);
+            // ⏰ ข้อมูลตัวนับถอยหลังสำหรับงานที่มีกำหนดส่งเท่านั้น
+            const isDeadlineTask = task.eisenhowerQuadrant === 'deadline';
+            const deadlineDaysLeft = isDeadlineTask ? daysUntil(task.dueDate) : null;
+            const deadlineUrgency = deadlineDaysLeft !== null ? getDeadlineUrgency(deadlineDaysLeft) : null;
+            const deadlineAccentColor =
+              deadlineUrgency === 'overdue' ? '#FF4D4D' :
+              deadlineUrgency === 'today' ? '#FF9F5A' :
+              deadlineUrgency === 'soon' ? '#FFE66D' : '#9DD9D2';
             return (
               <div
                 key={task.id}
-                className={`bg-white doodle-border doodle-shadow p-3.5 relative transition-all ${
+                className={`bg-white doodle-border doodle-shadow p-3.5 relative transition-all overflow-hidden ${
                   task.completed ? 'opacity-60 bg-gray-50' : ''
-                }`}
+                } ${isDeadlineTask && !task.completed && deadlineUrgency === 'overdue' ? 'bg-red-50' : ''}`}
               >
                 <div className="flex items-start gap-3">
                   <button
@@ -574,6 +638,18 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* ⏰ Badge นับถอยหลังวันครบกำหนดส่ง — เฉพาะงานประเภท Deadline */}
+                    {isDeadlineTask && deadlineDaysLeft !== null && (
+                      <div
+                        className="mt-1 inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border border-black w-fit"
+                        style={{ backgroundColor: task.completed ? '#E5E7EB' : deadlineAccentColor }}
+                      >
+                        <Timer className="w-3 h-3" />
+                        {formatDeadlineCountdown(deadlineDaysLeft, user.language)}
+                        <span className="font-normal">· {task.dueDate}</span>
+                      </div>
+                    )}
 
                     {/* 📅 ช่องเลือกวันใหม่แบบเร็ว ๆ (เปิดเมื่อกดปุ่มย้ายวัน) */}
                     {movingDateTaskId === task.id && (
@@ -780,6 +856,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   <option value="plan">Schedule (Important)</option>
                   <option value="quick">Delegate / Quick</option>
                   <option value="chill">Don't Do / Chill</option>
+                  <option value="deadline">⏰ {user.language === 'th' ? 'มีกำหนดส่ง (Deadline)' : 'Deadline'}</option>
                 </select>
               </div>
 

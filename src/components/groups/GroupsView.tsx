@@ -24,9 +24,10 @@ import {
   Image as ImageIcon,
   Megaphone,
   BellRing,
-  CalendarClock
+  CalendarClock,
+  Timer
 } from 'lucide-react';
-import { toLocalDateStr, getLocalTodayStr } from '../../utils/date';
+import { toLocalDateStr, getLocalTodayStr, daysUntil, getDeadlineUrgency, formatDeadlineCountdown } from '../../utils/date';
 import defaultGroupAvatarImg from '../../assets/group-default-avatar.jpg';
 import type { UserProfile } from '../../types';
 import { DEFAULT_AVATAR_URL } from '../../context/AppContext';
@@ -720,12 +721,13 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   };
 
   // แปลง Quadrant ของงานกลุ่ม ให้ตรงกับ eisenhowerQuadrant ฝั่งปฏิทินส่วนตัว
-  const mapGroupQuadrantToPersonal = (quadrant?: string): 'now' | 'plan' | 'quick' | 'chill' => {
+  const mapGroupQuadrantToPersonal = (quadrant?: string): 'now' | 'plan' | 'quick' | 'chill' | 'deadline' => {
     switch (quadrant) {
       case 'Do Now (Urgent & Imp': return 'now';
       case 'Schedule (Not Urgent & Imp)': return 'plan';
       case 'Delegate (Urgent & Not Imp)': return 'quick';
       case 'Eliminate (Not Urgent & Not Imp)': return 'chill';
+      case 'Deadline (มีกำหนดส่ง)': return 'deadline';
       default: return 'now';
     }
   };
@@ -1210,9 +1212,22 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const renderTaskCard = (task: GroupTask) => {
     const myStatus = currentUser ? task.responses?.[currentUser.uid] : undefined;
     const isCreator = currentUser?.uid === task.creatorId;
+    // ⏰ งานที่มีกำหนดส่ง — คำนวณตัวนับถอยหลังจาก dueDate เหมือนฝั่งงานส่วนตัว
+    const isDeadlineTask = task.quadrant === 'Deadline (มีกำหนดส่ง)';
+    const deadlineDaysLeft = isDeadlineTask && task.dueDate ? daysUntil(task.dueDate) : null;
+    const deadlineUrgency = deadlineDaysLeft !== null ? getDeadlineUrgency(deadlineDaysLeft) : null;
+    const deadlineAccentColor =
+      deadlineUrgency === 'overdue' ? '#FF4D4D' :
+      deadlineUrgency === 'today' ? '#FF9F5A' :
+      deadlineUrgency === 'soon' ? '#FFE66D' : '#9DD9D2';
 
     return (
-      <div key={task.id} className="bg-white doodle-border doodle-shadow p-4 space-y-3">
+      <div
+        key={task.id}
+        className={`bg-white doodle-border doodle-shadow p-4 space-y-3 relative overflow-hidden ${
+          deadlineUrgency === 'overdue' ? 'bg-red-50' : ''
+        }`}
+      >
         <div>
           <div className="flex items-center justify-between gap-2 mb-1">
             <h4 className="font-extrabold text-base text-[var(--text-main)] leading-snug">{task.title}</h4>
@@ -1222,6 +1237,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
               </span>
             )}
           </div>
+
+          {isDeadlineTask && deadlineDaysLeft !== null && (
+            <div
+              className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border border-black w-fit mb-2"
+              style={{ backgroundColor: deadlineAccentColor }}
+            >
+              <Timer className="w-3 h-3" />
+              {formatDeadlineCountdown(deadlineDaysLeft, user.language)}
+              <span className="font-normal">· {task.dueDate}</span>
+            </div>
+          )}
 
           {task.description && (
             <p className="text-xs font-medium text-gray-600 mb-2 whitespace-pre-line">{task.description}</p>
@@ -2062,6 +2088,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                     <option value="Schedule (Not Urgent & Imp)">Schedule (Not Urgent)</option>
                     <option value="Delegate (Urgent & Not Imp)">Delegate (Urgent)</option>
                     <option value="Eliminate (Not Urgent & Not Imp)">Eliminate</option>
+                    <option value="Deadline (มีกำหนดส่ง)">⏰ มีกำหนดส่ง (Deadline)</option>
                   </select>
                 </div>
               </div>
@@ -2438,6 +2465,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                     <option value="Schedule (Not Urgent & Imp)">Schedule (Not Urgent)</option>
                     <option value="Delegate (Urgent & Not Imp)">Delegate (Urgent)</option>
                     <option value="Eliminate (Not Urgent & Not Imp)">Eliminate</option>
+                    <option value="Deadline (มีกำหนดส่ง)">⏰ มีกำหนดส่ง (Deadline)</option>
                   </select>
                 </div>
               </div>

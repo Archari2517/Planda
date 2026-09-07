@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Task, UserProfile, Goal, Routine } from '../../types';
+import { Task, UserProfile, Goal, Routine, EisenhowerQuadrant } from '../../types';
 import { useTranslation } from '../../utils/translations';
 import { aiRescheduleMissedTasks, RescheduleProposal } from '../../services/geminiService';
+
 import { 
   Calendar as CalendarIcon, 
   ChevronDown, 
@@ -18,10 +19,11 @@ import {
   LayoutGrid,
   List,
   Repeat,
-  MapPin
+  MapPin,
+  Timer
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { toLocalDateStr } from '../../utils/date';
+import { toLocalDateStr, daysUntil, getDeadlineUrgency, formatDeadlineCountdown } from '../../utils/date';
 
 interface CalendarViewProps {
   user: UserProfile;
@@ -91,7 +93,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [newEndTime, setNewEndTime] = useState('09:30');
   const [durationHours, setDurationHours] = useState(0);
   const [durationMins, setDurationMins] = useState(30);
-  const [newQuadrant, setNewQuadrant] = useState<'now' | 'plan' | 'quick' | 'chill'>('now');
+  const [newQuadrant, setNewQuadrant] = useState<EisenhowerQuadrant>('now');
   const [newGoalId, setNewGoalId] = useState<string>('');
   // 🕒 ไม่ระบุเวลา (Anytime / Flex Task) — true = ไม่บังคับใส่ Start/End Time ตอนสร้างงาน
   // (เหมือน Flex Habit ของ Routine ที่ dueTime ว่าง '' และ endTime เป็น undefined)
@@ -255,7 +257,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     isSelected: boolean;
     pendingCount: number;
     completedCount: number;
+    hasDeadline: boolean;
   }> = [];
+
+  // ⏰ วันไหนมีงานที่มีกำหนดส่ง (ยังไม่เสร็จ) ให้ขึ้นจุดสีแดงเตือนบนกริดปฏิทิน
+  const hasDeadlineOn = (dateStr: string) =>
+    tasks.some(t => t.dueDate === dateStr && t.eisenhowerQuadrant === 'deadline' && !t.completed);
 
   const prevMonthLastDay = new Date(currentYear, currentMonth, 0).getDate();
   for (let i = startDayOfWeek - 1; i >= 0; i--) {
@@ -271,7 +278,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       isToday: dateStr === toLocalDateStr(new Date()),
       isSelected: dateStr === selectedDate,
       pendingCount,
-      completedCount
+      completedCount,
+      hasDeadline: hasDeadlineOn(dateStr)
     });
   }
 
@@ -287,7 +295,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       isToday: dateStr === toLocalDateStr(new Date()),
       isSelected: dateStr === selectedDate,
       pendingCount,
-      completedCount
+      completedCount,
+      hasDeadline: hasDeadlineOn(dateStr)
     });
   }
 
@@ -304,7 +313,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       isToday: dateStr === toLocalDateStr(new Date()),
       isSelected: dateStr === selectedDate,
       pendingCount,
-      completedCount
+      completedCount,
+      hasDeadline: hasDeadlineOn(dateStr)
     });
   }
 
@@ -334,9 +344,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   // Habit คือ Task ที่ไม่มี dueTime (ไม่ระบุเวลา) ไม่ว่าจะมาจาก Routine หรือผู้ใช้เพิ่มเอง
   // (Flex Task ที่เพิ่มเองผ่านฟอร์ม "ไม่ระบุเวลา" จะถูกจัดเข้ากลุ่มนี้เหมือนกัน แสดงเป็น
   // checklist ให้ติ๊กว่าทำแล้วแทนที่จะโชว์เวลา)
-  const isHabitTask = (task: Task) => !task.dueTime;
+  const isHabitTask = (task: Task) => !task.dueTime && task.eisenhowerQuadrant !== 'deadline';
+  // ⏰ งานที่มีกำหนดส่ง (Deadline Task) — แยกออกมาต่างหาก ไม่ปนกับ Habit หรือกิจกรรมมีเวลาปกติ
+  // เพราะสิ่งสำคัญคือ "เหลือกี่วันถึงจะครบกำหนด" ไม่ใช่ช่วงเวลาในวันนั้น
+  const deadlineActiveTasks = activeTasks
+    .filter((t) => t.eisenhowerQuadrant === 'deadline')
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const habitActiveTasks = activeTasks.filter(isHabitTask);
-  const timedActiveTasks = activeTasks.filter((t) => !isHabitTask(t));
+  const timedActiveTasks = activeTasks.filter((t) => !isHabitTask(t) && t.eisenhowerQuadrant !== 'deadline');
 
   const handleTriggerAiReschedule = async () => {
     if (missedTasks.length === 0) return;
@@ -529,6 +544,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       : 'bg-gray-50 opacity-40 text-gray-400'
                   }`}
                 >
+                  {cell.hasDeadline && (
+                    <span
+                      className="absolute -top-1 -right-1 text-[9px] leading-none"
+                      title={user.language === 'th' ? 'มีงานกำหนดส่ง' : 'Has a deadline task'}
+                    >
+                      ⏰
+                    </span>
+                  )}
                   <span className="text-xs">{cell.dayNum}</span>
 
                   <div className="flex gap-0.5 mt-0.5">
@@ -679,6 +702,62 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* ⏰ Deadline Tasks — งานที่มีกำหนดส่ง แสดงเด่นด้วยการ์ดสีพิเศษ + ตัวนับถอยหลัง */}
+        {deadlineActiveTasks.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-gray-700 uppercase tracking-wide">
+              <Timer className="w-3.5 h-3.5" />
+              <span>{user.language === 'th' ? 'งานที่มีกำหนดส่ง' : 'Deadline tasks'}</span>
+            </div>
+            {deadlineActiveTasks.map((task) => {
+              const daysLeft = daysUntil(task.dueDate);
+              const urgency = getDeadlineUrgency(daysLeft);
+              const accentColor =
+                urgency === 'overdue' ? '#FF4D4D' :
+                urgency === 'today' ? '#FF9F5A' :
+                urgency === 'soon' ? '#FFE66D' : '#9DD9D2';
+              return (
+                <div
+                  key={task.id}
+                  className={`bg-white doodle-border doodle-shadow-sm p-3 relative overflow-hidden flex items-center gap-3 ${
+                    task.completed ? 'opacity-60 bg-gray-50' : urgency === 'overdue' ? 'bg-red-50' : ''
+                  }`}
+                >
+                  <button
+                    onClick={() => handleCheckTask(task.id, task.completed)}
+                    className={`w-5 h-5 rounded-md doodle-border-sm shrink-0 flex items-center justify-center transition-all ${
+                      task.completed ? 'bg-[var(--ink-solid)] text-white' : 'bg-white hover:bg-gray-100'
+                    }`}
+                  >
+                    {task.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold leading-snug line-clamp-1 ${
+                      task.completed ? 'line-through text-gray-400' : 'text-[var(--text-main)]'
+                    }`}>
+                      {task.title}
+                    </p>
+                    <div
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border border-black w-fit"
+                      style={{ backgroundColor: task.completed ? '#E5E7EB' : accentColor }}
+                    >
+                      <Timer className="w-3 h-3" />
+                      {formatDeadlineCountdown(daysLeft, user.language)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onDeleteTask(task.id)}
+                    className="text-gray-400 hover:text-red-600 opacity-60 hover:opacity-100 p-1 shrink-0"
+                    title="Delete task"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* 🔁 Habit Checklist — กิจกรรมที่เป็น Habit (ไม่มีเวลาตายตัว) ขึ้นเป็น Checklist/Badge
             แยกจากกิจกรรมที่มีเวลา (จะถูกจัดลงกล่องเวลาด้านล่างแทน) */}
@@ -977,6 +1056,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <option value="plan">Schedule (Important)</option>
                     <option value="quick">Delegate / Quick</option>
                     <option value="chill">Don't Do / Chill</option>
+                    <option value="deadline">⏰ {user.language === 'th' ? 'มีกำหนดส่ง (Deadline)' : 'Deadline'}</option>
                   </select>
                 </div>
               </div>

@@ -1,7 +1,9 @@
 export type EnergyType = 'morning_owl' | 'afternoon_lion' | 'night_owl' | 'deep_night';
 export type ThemeAccent = 'yellow' | 'coral' | 'sky' | 'mint' | 'blue';
 export type Language = 'en' | 'th';
-export type EisenhowerQuadrant = 'now' | 'plan' | 'quick' | 'chill';
+// 🗓️ 'deadline' = งานที่มีกำหนดส่ง (Deadline Task) — ประเภทงานพิเศษเพิ่มเติมจาก 4 Quadrant เดิม
+// ใช้ dueDate เดิมเป็น "วันครบกำหนดส่ง" และคำนวณตัวนับถอยหลังจากค่านี้โดยตรง ไม่ต้องมีฟิลด์ใหม่
+export type EisenhowerQuadrant = 'now' | 'plan' | 'quick' | 'chill' | 'deadline';
 export type GoalType = 'short_term' | 'long_term';
 export type Timeframe = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type GoalCategory = 'study' | 'work' | 'fitness' | 'finance' | 'personal';
