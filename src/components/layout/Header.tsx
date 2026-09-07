@@ -1,7 +1,8 @@
 import React from 'react';
-import { UserProfile, ActiveTab } from '../../types';
+import { UserProfile, ActiveTab, Task } from '../../types';
 import { useTranslation } from '../../utils/translations';
 import { Sparkles, RefreshCw, Settings } from 'lucide-react';
+import { NotificationBell } from '../notifications/NotificationBell';
 
 interface HeaderProps {
   user: UserProfile;
@@ -9,6 +10,9 @@ interface HeaderProps {
   isSyncing: boolean;
   onOpenSettings: () => void;
   onNavigateSettings: () => void;
+  tasks?: Task[];
+  authUserUid?: string;
+  onNavigateTab?: (tab: ActiveTab) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,7 +20,10 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   isSyncing,
   onOpenSettings,
-  onNavigateSettings
+  onNavigateSettings,
+  tasks = [],
+  authUserUid,
+  onNavigateTab
 }) => {
   const t = useTranslation(user.language);
 
@@ -87,8 +94,16 @@ export const Header: React.FC<HeaderProps> = ({
           {getTitle()}
         </h1>
 
-        {/* Right: Settings Shortcut */}
+        {/* Right: Notification Bell + Settings Shortcut */}
         <div className="flex items-center gap-1.5">
+          {onNavigateTab && (
+            <NotificationBell
+              language={user.language}
+              tasks={tasks}
+              authUserUid={authUserUid}
+              onNavigateTab={onNavigateTab}
+            />
+          )}
           <button
             onClick={onNavigateSettings}
             className="p-2 doodle-border-sm bg-white dark:bg-[var(--card-bg)] hover:bg-[var(--accent-color)] doodle-shadow-sm doodle-btn flex items-center justify-center text-xs font-bold shrink-0"

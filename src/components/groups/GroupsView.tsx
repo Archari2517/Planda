@@ -90,6 +90,9 @@ interface GroupTask {
   // วันที่ของงาน (YYYY-MM-DD) — ใช้แสดงผลในมุมมองปฏิทิน
   // งานเก่าที่สร้างก่อนอัปเดตนี้อาจไม่มีค่านี้ (undefined) จะถูกจัดเป็น "ยังไม่ระบุวันที่"
   dueDate?: string;
+  // เวลาที่สร้างงานนี้ (ISO string) — ใช้เรียงลำดับ "ล่าสุดก่อน" ในระบบแจ้งเตือน
+  // งานเก่าที่สร้างก่อนอัปเดตนี้อาจไม่มีค่านี้ (undefined)
+  createdAt?: string;
 }
 
 interface Group {
@@ -219,6 +222,18 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   // Filter งานในกลุ่มตามสถานะการตอบรับของฉัน: งานใหม่ / ยืนยันแล้ว / ปฏิเสธแล้ว
   const [taskStatusFilter, setTaskStatusFilter] = useState<'NEW' | 'ACCEPTED' | 'REJECTED'>('NEW');
 
+  // 📅 ตัวกรองวันที่ของรายการงานกลุ่ม (เหมือนหน้า Tasks ส่วนตัว) — วันนี้ / ทั้งหมด / เลือกช่วงเวลาเอง
+  // 'today'  = แสดงเฉพาะงานของวันนี้จริงๆ
+  // 'all'    = แสดงงานทั้งหมดของกลุ่ม ไม่กรองตามวันที่ (รวมงานที่ยังไม่ระบุวันที่ด้วย) — ค่าเริ่มต้น
+  // 'custom' = แสดงเฉพาะงานในช่วงวันที่ที่เลือกเอง (รวมถึงตอนกดเลือกวันบนปฏิทินด้านล่าง)
+  type GroupTaskDateFilterMode = 'today' | 'all' | 'custom';
+  const [taskDateFilterMode, setTaskDateFilterMode] = useState<GroupTaskDateFilterMode>('all');
+  const [taskCustomStartDate, setTaskCustomStartDate] = useState<string>(getLocalTodayStr());
+  const [taskCustomEndDate, setTaskCustomEndDate] = useState<string>(getLocalTodayStr());
+
+  // 🏷️ ตัวกรองหมวดหมู่ของงานกลุ่ม (Category Filter) — ค่าเริ่มต้น 'all' คือไม่กรอง
+  const [taskCategoryFilter, setTaskCategoryFilter] = useState<string>('all');
+
   // 📢 State ของฟีเจอร์ "แจ้งข่าว" ในกลุ่ม
   const [news, setNews] = useState<GroupNews[]>([]);
   const [showAddNewsModal, setShowAddNewsModal] = useState(false);
@@ -230,16 +245,16 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const [newsTime, setNewsTime] = useState('');
   // ใช้เฉพาะตอนแก้ไขข่าว — ให้แก้วันที่ของข่าวได้โดยตรงโดยไม่ต้องย้ายไปเลือกวันบนปฏิทินก่อน
   const [editNewsDate, setEditNewsDate] = useState('');
+  // 📅 วันที่ของข่าวที่กำลังจะสร้างใหม่ — เลือกได้ตรงๆ ในฟอร์ม (ก่อนหน้านี้ใช้วันที่จากปฏิทินกลุ่ม แต่ตอนนี้เอาปฏิทินออกจากหน้าข่าวแล้ว)
+  const [newNewsDate, setNewNewsDate] = useState<string>(getLocalTodayStr());
   // กรองข่าวตามสถานะ "การรับทราบ" ของฉัน: ข่าวใหม่ (ยังไม่กดรับทราบ) / รับทราบแล้ว
   const [newsStatusFilter, setNewsStatusFilter] = useState<'NEW' | 'ACKNOWLEDGED'>('NEW');
-  // มุมมองรายการข่าว: ตามวันที่ที่เลือกบนปฏิทิน / ข่าวทั้งหมดในกลุ่มแบบไม่กำหนดวัน
-  const [newsViewMode, setNewsViewMode] = useState<'byDate' | 'all'>('byDate');
 
   // Calendar States — เลือกวันที่เพื่อดู/เพิ่มงานของกลุ่มในวันนั้นๆ
   const [selectedDate, setSelectedDate] = useState<string>(getLocalTodayStr());
   const [viewMonthDate, setViewMonthDate] = useState<Date>(new Date());
   // สลับมุมมองปฏิทินกลุ่ม รายสัปดาห์ / รายเดือน และพับ/ขยายปฏิทิน (เหมือนหน้าปฏิทินหลัก)
-  const [groupCalendarViewMode, setGroupCalendarViewMode] = useState<'week' | 'month'>('month');
+  const [groupCalendarViewMode, setGroupCalendarViewMode] = useState<'week' | 'month'>('week');
   const [isGroupCalendarCollapsed, setIsGroupCalendarCollapsed] = useState(false);
 
   // Form States - Task
@@ -444,6 +459,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     setNewsLocation('');
     setNewsTime('');
     setEditNewsDate('');
+    setNewNewsDate(getLocalTodayStr());
   };
 
   // เลือกภาพกลุ่มตอนสร้างกลุ่มใหม่ (อัปโหลดไฟล์ → แปลงเป็น base64)
@@ -650,7 +666,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         dueDate: selectedDate,
         sharedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
         creatorId: currentUser.uid,
-        responses: {}
+        responses: {},
+        createdAt: new Date().toISOString()
       });
 
       resetTaskForm();
@@ -824,7 +841,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         title: newsTitle.trim(),
         description: newsDescription.trim(),
         location: newsLocation.trim(),
-        newsDate: selectedDate,
+        newsDate: newNewsDate,
         newsTime,
         postedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
         creatorId: currentUser.uid,
@@ -847,7 +864,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     setNewsDescription(item.description || '');
     setNewsLocation(item.location || '');
     setNewsTime(item.newsTime || '');
-    setEditNewsDate(item.newsDate || selectedDate);
+    setEditNewsDate(item.newsDate || getLocalTodayStr());
     setShowEditNewsModal(true);
   };
 
@@ -920,14 +937,20 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const totalDaysInMonth = lastDayOfMonth.getDate();
   const todayStr = getLocalTodayStr();
 
+  // งานของวันนี้ถือว่า "จัดการครบแล้ว" เมื่อฉันได้ตอบรับ (ยืนยัน/ปฏิเสธ) ครบทุกงานของวันนั้น
+  const isTaskResolvedByMe = (t: GroupTask) => !!currentUser && !!t.responses?.[currentUser.uid];
+
   const buildGridCell = (d: Date, isCurrentMonth: boolean) => {
     const dateStr = toLocalDateStr(d);
-    const taskCount = tasks.filter((t) => t.dueDate === dateStr).length;
+    const dateTasks = tasks.filter((t) => t.dueDate === dateStr);
+    const taskCount = dateTasks.length;
     const dateNews = news.filter((n) => n.newsDate === dateStr);
     const newsCount = dateNews.length;
     // ทุกข่าวของวันนี้ถูก "ฉัน" กดรับทราบครบแล้วหรือยัง — ใช้ตัดสินสีจุดบนปฏิทิน (เขียว = รับทราบครบแล้ว)
     const newsAllAcknowledged =
       newsCount > 0 && dateNews.every((n) => !!currentUser && !!n.acknowledgedBy?.includes(currentUser.uid));
+    // ทุกงานของวันนี้ถูก "ฉัน" กดยืนยัน/ปฏิเสธครบแล้วหรือยัง — ใช้ตัดสินสีจุดบนปฏิทิน (เขียว = จัดการครบแล้ว)
+    const tasksAllResolved = taskCount > 0 && dateTasks.every(isTaskResolvedByMe);
     return {
       dateStr,
       dayNum: d.getDate(),
@@ -936,6 +959,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
       taskCount,
       newsCount,
       newsAllAcknowledged,
+      tasksAllResolved,
     };
   };
 
@@ -965,11 +989,13 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     const dateStr = toLocalDateStr(d);
     const dayName = d.toLocaleDateString('th-TH', { weekday: 'short' }).toUpperCase();
     const dayNum = d.getDate();
-    const taskCount = tasks.filter((t) => t.dueDate === dateStr).length;
+    const dateTasks = tasks.filter((t) => t.dueDate === dateStr);
+    const taskCount = dateTasks.length;
     const dateNews = news.filter((n) => n.newsDate === dateStr);
     const newsCount = dateNews.length;
     const newsAllAcknowledged =
       newsCount > 0 && dateNews.every((n) => !!currentUser && !!n.acknowledgedBy?.includes(currentUser.uid));
+    const tasksAllResolved = taskCount > 0 && dateTasks.every(isTaskResolvedByMe);
     return {
       dateStr,
       dayName,
@@ -979,6 +1005,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
       taskCount,
       newsCount,
       newsAllAcknowledged,
+      tasksAllResolved,
     };
   });
 
@@ -989,6 +1016,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     setSelectedDate(dateStr);
     const selectedObj = new Date(dateStr);
     setViewMonthDate(new Date(selectedObj.getFullYear(), selectedObj.getMonth(), 1));
+    // เลือกวันบนปฏิทิน = ต้องการดูงานของวันนั้นวันเดียว ➔ สลับตัวกรองวันที่ของรายการงานเป็น "เลือกช่วงเวลา" แบบวันเดียว
+    setTaskDateFilterMode('custom');
+    setTaskCustomStartDate(dateStr);
+    setTaskCustomEndDate(dateStr);
   };
 
   const selectedDateLabel = new Date(selectedDate).toLocaleDateString('th-TH', {
@@ -1004,9 +1035,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     const getCount = (cell: { taskCount: number; newsCount: number }) =>
       itemLabel === 'งาน' ? cell.taskCount : cell.newsCount;
 
-    // สีจุด: ข่าว - เขียวถ้ารับทราบครบวันนั้นแล้ว ไม่งั้นแดง / งาน - แดงเสมอ
-    const getDotColorClass = (cell: { newsAllAcknowledged: boolean }) =>
-      itemLabel === 'ข่าว' && cell.newsAllAcknowledged ? 'bg-[#4CAF6D]' : 'bg-[#FF4D4D]';
+    // สีจุด: ข่าว - เขียวถ้ารับทราบครบวันนั้นแล้ว ไม่งั้นแดง / งาน - เขียวถ้ายืนยัน/ปฏิเสธครบทุกงานของวันนั้นแล้ว ไม่งั้นแดง
+    const getDotColorClass = (cell: { newsAllAcknowledged: boolean; tasksAllResolved?: boolean }) =>
+      (itemLabel === 'ข่าว' && cell.newsAllAcknowledged) || (itemLabel === 'งาน' && cell.tasksAllResolved)
+        ? 'bg-[#4CAF6D]'
+        : 'bg-[#FF4D4D]';
 
     return (
       <div className="bg-white doodle-border doodle-shadow p-3.5 space-y-2.5">
@@ -1094,7 +1127,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                         {count > 0 && (
                           <span
                             className={`w-1.5 h-1.5 rounded-full mt-0.5 ${getDotColorClass(cell)}`}
-                            title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && cell.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}`}
+                            title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && cell.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}${itemLabel === 'งาน' && cell.tasksAllResolved ? ' (จัดการครบแล้ว)' : ''}`}
                           />
                         )}
                       </button>
@@ -1127,7 +1160,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                       {count > 0 && (
                         <span
                           className={`w-1.5 h-1.5 rounded-full mt-1 ${getDotColorClass(day)}`}
-                          title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && day.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}`}
+                          title={`${count} ${itemLabel}${itemLabel === 'ข่าว' && day.newsAllAcknowledged ? ' (รับทราบครบแล้ว)' : ''}${itemLabel === 'งาน' && day.tasksAllResolved ? ' (จัดการครบแล้ว)' : ''}`}
                         />
                       )}
                     </button>
@@ -1137,7 +1170,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
             )}
 
             <button
-              onClick={() => handleSelectDay(getLocalTodayStr())}
+              onClick={() => {
+                handleSelectDay(getLocalTodayStr());
+                setTaskDateFilterMode('today');
+              }}
               className="w-full py-1.5 bg-gray-100 hover:bg-gray-200 doodle-border-sm text-[11px] font-black doodle-btn"
             >
               กลับไปวันนี้
@@ -1148,13 +1184,22 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     );
   };
 
-  // งานของวันที่เลือกไว้ / งานเก่าที่ยังไม่เคยระบุวันที่ (backward-compat)
-  const tasksForSelectedDate = tasks.filter((t) => t.dueDate === selectedDate);
-  const undatedTasks = tasks.filter((t) => !t.dueDate);
+  // 🏷️ ตัวเลือกหมวดหมู่ของงานกลุ่ม (Category Filter) — ดึงจากค่า category จริงที่มีอยู่ในงานกลุ่มนี้ทั้งหมด
+  const taskCategoryOptions = Array.from(
+    new Set(tasks.map((t) => t.category).filter((c): c is string => !!c))
+  );
+  const effectiveTaskCategoryFilter = taskCategoryOptions.includes(taskCategoryFilter) ? taskCategoryFilter : 'all';
 
-  // ข่าวของวันที่เลือกไว้ / ข่าวเก่าที่ไม่ได้ระบุวันที่
-  const newsForSelectedDate = news.filter((n) => n.newsDate === selectedDate);
-  const undatedNews = news.filter((n) => !n.newsDate);
+  // 📅🏷️ กรองงานกลุ่มตามตัวกรองวันที่ (วันนี้ / ทั้งหมด / เลือกช่วงเวลาเอง) + หมวดหมู่ที่เลือกไว้
+  // โหมด "ทั้งหมด" จะรวมงานเก่าที่ยังไม่เคยระบุวันที่ (backward-compat) ไว้ด้วย
+  const dateAndCategoryFilteredTasks = tasks.filter((t) => {
+    if (effectiveTaskCategoryFilter !== 'all' && t.category !== effectiveTaskCategoryFilter) return false;
+    if (taskDateFilterMode === 'today') return t.dueDate === todayStr;
+    if (taskDateFilterMode === 'custom') {
+      return !!t.dueDate && t.dueDate >= taskCustomStartDate && t.dueDate <= taskCustomEndDate;
+    }
+    return true; // 'all'
+  });
 
   // แยกงานตามสถานะการตอบรับของ "ฉัน" — งานใหม่ (ยังไม่ตอบ) / ยืนยันแล้ว / ปฏิเสธแล้ว
   const getMyStatus = (task: GroupTask): 'ACCEPTED' | 'REJECTED' | undefined =>
@@ -1166,28 +1211,28 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     rejectedTasks: list.filter((t) => getMyStatus(t) === 'REJECTED'),
   });
 
-  const selectedDateStatusGroups = groupTasksByStatus(tasksForSelectedDate);
-  const undatedStatusGroups = groupTasksByStatus(undatedTasks);
+  const dateFilteredStatusGroups = groupTasksByStatus(dateAndCategoryFilteredTasks);
 
-  const filteredTasksForSelectedDate =
+  const filteredGroupTasks =
     taskStatusFilter === 'NEW'
-      ? selectedDateStatusGroups.newTasks
+      ? dateFilteredStatusGroups.newTasks
       : taskStatusFilter === 'ACCEPTED'
-      ? selectedDateStatusGroups.acceptedTasks
-      : selectedDateStatusGroups.rejectedTasks;
+      ? dateFilteredStatusGroups.acceptedTasks
+      : dateFilteredStatusGroups.rejectedTasks;
 
-  const filteredUndatedTasks =
-    taskStatusFilter === 'NEW'
-      ? undatedStatusGroups.newTasks
-      : taskStatusFilter === 'ACCEPTED'
-      ? undatedStatusGroups.acceptedTasks
-      : undatedStatusGroups.rejectedTasks;
+  // เรียงงานที่มีวันที่ตามวันที่ใกล้สุดก่อน แล้วตามด้วยงานเก่าที่ยังไม่ระบุวันที่ (แสดงเมื่อเลือกโหมด "ทั้งหมด")
+  const sortedFilteredGroupTasks = [...filteredGroupTasks].sort((a, b) => {
+    if (!a.dueDate && !b.dueDate) return 0;
+    if (!a.dueDate) return 1;
+    if (!b.dueDate) return -1;
+    return a.dueDate.localeCompare(b.dueDate);
+  });
 
   // แถบแท็บแนวนอน (Pill Strip) สำหรับกรองงานตามสถานะ — งานใหม่ / ยืนยันแล้ว / ปฏิเสธแล้ว
   const taskStatusTabs: Array<{ key: 'NEW' | 'ACCEPTED' | 'REJECTED'; label: string; icon: string; count: number }> = [
-    { key: 'NEW', label: 'งานใหม่', icon: '🆕', count: selectedDateStatusGroups.newTasks.length },
-    { key: 'ACCEPTED', label: 'ยืนยันแล้ว', icon: '✅', count: selectedDateStatusGroups.acceptedTasks.length },
-    { key: 'REJECTED', label: 'ปฏิเสธแล้ว', icon: '❌', count: selectedDateStatusGroups.rejectedTasks.length },
+    { key: 'NEW', label: 'งานใหม่', icon: '🆕', count: dateFilteredStatusGroups.newTasks.length },
+    { key: 'ACCEPTED', label: 'ยืนยันแล้ว', icon: '✅', count: dateFilteredStatusGroups.acceptedTasks.length },
+    { key: 'REJECTED', label: 'ปฏิเสธแล้ว', icon: '❌', count: dateFilteredStatusGroups.rejectedTasks.length },
   ];
 
   const renderTaskStatusTabBar = () => (
@@ -1353,41 +1398,12 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const newNewsList = news.filter((n) => !isNewsAcknowledgedByMe(n));
   const acknowledgedNewsList = news.filter((n) => isNewsAcknowledgedByMe(n));
 
-  // ใช้ตอนดูโหมด "ข่าวทั้งหมด" (ไม่กำหนดวัน) — เรียงข่าวล่าสุดไว้บนสุด กรองแค่ตามสถานะรับทราบ
+  // ใช้แสดงรายการข่าวทั้งหมดของกลุ่ม — เรียงข่าวล่าสุดไว้บนสุด กรองแค่ตามสถานะรับทราบ
   const displayedAllNewsList = newsStatusFilter === 'NEW' ? newNewsList : acknowledgedNewsList;
 
-  // แยกข่าว "ตามวันที่ที่เลือกในปฏิทิน" ตามสถานะรับทราบของฉัน (เหมือนหน้างานในกลุ่ม)
-  const newsByStatus = (list: GroupNews[]) => ({
-    newItems: list.filter((n) => !isNewsAcknowledgedByMe(n)),
-    acknowledgedItems: list.filter((n) => isNewsAcknowledgedByMe(n)),
-  });
-
-  const selectedDateNewsStatusGroups = newsByStatus(newsForSelectedDate);
-  const undatedNewsStatusGroups = newsByStatus(undatedNews);
-
-  const filteredNewsForSelectedDate =
-    newsStatusFilter === 'NEW'
-      ? selectedDateNewsStatusGroups.newItems
-      : selectedDateNewsStatusGroups.acknowledgedItems;
-
-  const filteredUndatedNews =
-    newsStatusFilter === 'NEW'
-      ? undatedNewsStatusGroups.newItems
-      : undatedNewsStatusGroups.acknowledgedItems;
-
   const newsStatusTabs: Array<{ key: 'NEW' | 'ACKNOWLEDGED'; label: string; icon: string; count: number }> = [
-    {
-      key: 'NEW',
-      label: 'ข่าวใหม่',
-      icon: '📢',
-      count: newsViewMode === 'all' ? newNewsList.length : selectedDateNewsStatusGroups.newItems.length,
-    },
-    {
-      key: 'ACKNOWLEDGED',
-      label: 'รับทราบแล้ว',
-      icon: '✅',
-      count: newsViewMode === 'all' ? acknowledgedNewsList.length : selectedDateNewsStatusGroups.acknowledgedItems.length,
-    },
+    { key: 'NEW', label: 'ข่าวใหม่', icon: '📢', count: newNewsList.length },
+    { key: 'ACKNOWLEDGED', label: 'รับทราบแล้ว', icon: '✅', count: acknowledgedNewsList.length },
   ];
 
   const renderNewsStatusTabBar = () => (
@@ -1679,14 +1695,25 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
               {/* 🗓️ ปฏิทินกลุ่ม — เลือกวันแล้วกดเพิ่มงานในวันนั้นได้เลย (พับ/ขยาย และสลับรายสัปดาห์/รายเดือนได้) */}
               {renderGroupCalendar('งาน')}
 
-              {/* งานของวันที่เลือกไว้ */}
+              {/* หัวข้อรายการงาน + ปุ่มเพิ่มงาน */}
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque']">
-                    งานวันที่ {selectedDateLabel}
+                    {taskDateFilterMode === 'today'
+                      ? 'งานวันนี้'
+                      : taskDateFilterMode === 'all'
+                      ? 'งานทั้งหมด'
+                      : taskCustomStartDate === taskCustomEndDate
+                      ? `งานวันที่ ${new Date(taskCustomStartDate).toLocaleDateString('th-TH', {
+                          weekday: 'short',
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}`
+                      : `งานช่วง ${taskCustomStartDate} ถึง ${taskCustomEndDate}`}
                   </h3>
                   <span className="text-[11px] font-bold text-gray-500">
-                    {tasksForSelectedDate.length} งาน
+                    {dateAndCategoryFilteredTasks.length} งาน
                   </span>
                 </div>
                 <button 
@@ -1698,13 +1725,64 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                 </button>
               </div>
 
-              {/* แถบแท็บกรองงานตามสถานะ: งานใหม่ / ยืนยันแล้ว / ปฏิเสธแล้ว */}
+              {/* ตัวกรองหมวดหมู่ + ตัวกรองวันที่ (วันนี้ / ทั้งหมด / เลือกช่วงเวลา) */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {taskCategoryOptions.length > 0 && (
+                  <select
+                    value={effectiveTaskCategoryFilter}
+                    onChange={(e) => setTaskCategoryFilter(e.target.value)}
+                    className="doodle-input text-[10px] font-bold px-2 py-1"
+                  >
+                    <option value="all">ทุกหมวดหมู่</option>
+                    {taskCategoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                )}
+
+                <div className="flex bg-white doodle-border-pill doodle-shadow-sm p-0.5 gap-0.5 shrink-0">
+                  {(['today', 'all', 'custom'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setTaskDateFilterMode(mode)}
+                      className={`doodle-btn px-2.5 py-1 rounded-full text-[10px] font-bold transition-colors ${
+                        taskDateFilterMode === mode ? 'bg-accent text-[#1A1A1A]' : 'text-gray-400'
+                      }`}
+                    >
+                      {mode === 'today' ? 'วันนี้' : mode === 'all' ? 'ทั้งหมด' : 'เลือกช่วงเวลา'}
+                    </button>
+                  ))}
+                </div>
+
+                {taskDateFilterMode === 'custom' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <input
+                      type="date"
+                      value={taskCustomStartDate}
+                      onChange={(e) => setTaskCustomStartDate(e.target.value)}
+                      className="doodle-input text-[11px] font-bold px-2 py-1"
+                      aria-label="วันที่เริ่มต้น"
+                    />
+                    <span className="text-[10px] font-bold text-gray-400">ถึง</span>
+                    <input
+                      type="date"
+                      value={taskCustomEndDate}
+                      onChange={(e) => setTaskCustomEndDate(e.target.value)}
+                      className="doodle-input text-[11px] font-bold px-2 py-1"
+                      aria-label="วันที่สิ้นสุด"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* แถบแท็บกรองงานตามสถานะ: ทั้งหมด / งานใหม่ / ยืนยันแล้ว / ปฏิเสธแล้ว */}
               {renderTaskStatusTabBar()}
 
-              {tasksForSelectedDate.length === 0 ? (
+              {dateAndCategoryFilteredTasks.length === 0 ? (
                 <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-2">
                   <span className="text-3xl">📝</span>
-                  <p className="text-xs font-bold text-gray-600">ยังไม่มีงานในวันที่เลือกนี้</p>
+                  <p className="text-xs font-bold text-gray-600">ยังไม่มีงานในช่วงที่เลือกนี้</p>
                   <button
                     onClick={() => setShowAddTaskModal(true)}
                     className="mt-2 bg-[var(--ink-solid)] text-white px-3 py-1.5 rounded-xl text-xs font-bold doodle-btn inline-flex items-center gap-1"
@@ -1712,28 +1790,18 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                     <Plus className="w-3 h-3 text-[var(--accent-color)]" /> เพิ่มงานในวันนี้
                   </button>
                 </div>
-              ) : filteredTasksForSelectedDate.length === 0 ? (
+              ) : sortedFilteredGroupTasks.length === 0 ? (
                 <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
                   <span className="text-3xl">
                     {taskStatusFilter === 'NEW' ? '🆕' : taskStatusFilter === 'ACCEPTED' ? '✅' : '❌'}
                   </span>
                   <p className="text-xs font-bold text-gray-600">
-                    ไม่มีงาน{taskStatusFilter === 'NEW' ? 'ใหม่' : taskStatusFilter === 'ACCEPTED' ? 'ที่ยืนยันแล้ว' : 'ที่ปฏิเสธแล้ว'}ในวันนี้
+                    ไม่มีงาน{taskStatusFilter === 'NEW' ? 'ใหม่' : taskStatusFilter === 'ACCEPTED' ? 'ที่ยืนยันแล้ว' : 'ที่ปฏิเสธแล้ว'}ในช่วงที่เลือก
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredTasksForSelectedDate.map(renderTaskCard)}
-                </div>
-              )}
-
-              {/* งานเก่าที่ยังไม่เคยระบุวันที่ (ก่อนอัปเดตฟีเจอร์ปฏิทิน) — แสดงแยกไว้ไม่ให้หายไป */}
-              {undatedTasks.length > 0 && filteredUndatedTasks.length > 0 && (
-                <div className="space-y-3 pt-2">
-                  <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque'] text-gray-500">
-                    งานที่ยังไม่ระบุวันที่ ({filteredUndatedTasks.length})
-                  </h3>
-                  {filteredUndatedTasks.map(renderTaskCard)}
+                  {sortedFilteredGroupTasks.map(renderTaskCard)}
                 </div>
               )}
             </div>
@@ -1741,41 +1809,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
 
           {activeTab === 'news' && (
             <div className="space-y-3">
-              {/* สลับมุมมอง: ดูตามวันที่บนปฏิทิน / ดูข่าวทั้งหมดแบบไม่กำหนดวัน */}
-              <div className="flex bg-white doodle-border-sm p-1 doodle-shadow-sm gap-1">
-                <button
-                  onClick={() => setNewsViewMode('byDate')}
-                  className={`flex-1 py-2 px-1 text-xs font-black rounded-lg transition-all doodle-btn flex items-center justify-center gap-1 ${
-                    newsViewMode === 'byDate'
-                      ? 'bg-[var(--ink-solid)] text-white shadow-[2px_2px_0px_var(--ink-black)]'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  <CalendarDays className="w-3.5 h-3.5" /> ตามวันที่
-                </button>
-                <button
-                  onClick={() => setNewsViewMode('all')}
-                  className={`flex-1 py-2 px-1 text-xs font-black rounded-lg transition-all doodle-btn flex items-center justify-center gap-1 ${
-                    newsViewMode === 'all'
-                      ? 'bg-[var(--ink-solid)] text-white shadow-[2px_2px_0px_var(--ink-black)]'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" /> ข่าวทั้งหมด ({news.length})
-                </button>
-              </div>
-
-              {/* 🗓️ ปฏิทินกลุ่ม — เลือกวันแล้วกดแจ้งข่าวสำหรับวันนั้นได้เลย (เหมือนหน้างานในกลุ่ม) */}
-              {newsViewMode === 'byDate' && renderGroupCalendar('ข่าว')}
-
-              {/* หัวข้อรายการข่าว */}
+              {/* หัวข้อรายการข่าว — ไม่มีปฏิทินแล้ว แสดงข่าวทั้งหมดในกลุ่มตรงๆ */}
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque']">
-                    {newsViewMode === 'byDate' ? `ข่าววันที่ ${selectedDateLabel}` : 'ข่าวทั้งหมดในกลุ่ม'}
+                    ข่าวทั้งหมดในกลุ่ม
                   </h3>
                   <span className="text-[11px] font-bold text-gray-500">
-                    {newsViewMode === 'byDate' ? `${newsForSelectedDate.length} ข่าว` : `${news.length} ข่าวทั้งหมด`}
+                    {news.length} ข่าวทั้งหมด
                   </span>
                 </div>
                 <button
@@ -1790,57 +1831,19 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
               {/* แถบแท็บกรองข่าวตามสถานะ: ข่าวใหม่ / รับทราบแล้ว */}
               {renderNewsStatusTabBar()}
 
-              {newsViewMode === 'all' ? (
-                displayedAllNewsList.length === 0 ? (
-                  <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
-                    <span className="text-3xl">{newsStatusFilter === 'NEW' ? '📢' : '✅'}</span>
-                    <p className="text-xs font-bold text-gray-600">
-                      {news.length === 0
-                        ? 'ยังไม่มีข่าวสารในกลุ่มนี้'
-                        : `ไม่มีข่าว${newsStatusFilter === 'NEW' ? 'ใหม่' : 'ที่รับทราบแล้ว'}`}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {displayedAllNewsList.map(renderNewsCard)}
-                  </div>
-                )
+              {displayedAllNewsList.length === 0 ? (
+                <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
+                  <span className="text-3xl">{newsStatusFilter === 'NEW' ? '📢' : '✅'}</span>
+                  <p className="text-xs font-bold text-gray-600">
+                    {news.length === 0
+                      ? 'ยังไม่มีข่าวสารในกลุ่มนี้'
+                      : `ไม่มีข่าว${newsStatusFilter === 'NEW' ? 'ใหม่' : 'ที่รับทราบแล้ว'}`}
+                  </p>
+                </div>
               ) : (
-                <>
-                  {newsForSelectedDate.length === 0 ? (
-                    <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-2">
-                      <span className="text-3xl">📢</span>
-                      <p className="text-xs font-bold text-gray-600">ยังไม่มีข่าวในวันที่เลือกนี้</p>
-                      <button
-                        onClick={() => setShowAddNewsModal(true)}
-                        className="mt-2 bg-[var(--ink-solid)] text-white px-3 py-1.5 rounded-xl text-xs font-bold doodle-btn inline-flex items-center gap-1"
-                      >
-                        <BellRing className="w-3 h-3 text-[var(--accent-color)]" /> แจ้งข่าวในวันนี้
-                      </button>
-                    </div>
-                  ) : filteredNewsForSelectedDate.length === 0 ? (
-                    <div className="bg-white doodle-border doodle-shadow p-6 text-center space-y-1">
-                      <span className="text-3xl">{newsStatusFilter === 'NEW' ? '📢' : '✅'}</span>
-                      <p className="text-xs font-bold text-gray-600">
-                        ไม่มีข่าว{newsStatusFilter === 'NEW' ? 'ใหม่' : 'ที่รับทราบแล้ว'}ในวันนี้
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {filteredNewsForSelectedDate.map(renderNewsCard)}
-                    </div>
-                  )}
-
-                  {/* ข่าวเก่าที่ไม่ได้ระบุวันที่ — แสดงแยกไว้ไม่ให้หายไป */}
-                  {undatedNews.length > 0 && filteredUndatedNews.length > 0 && (
-                    <div className="space-y-3 pt-2">
-                      <h3 className="font-extrabold text-sm font-['Bricolage_Grotesque'] text-gray-500">
-                        ข่าวที่ไม่ระบุวันที่ ({filteredUndatedNews.length})
-                      </h3>
-                      {filteredUndatedNews.map(renderNewsCard)}
-                    </div>
-                  )}
-                </>
+                <div className="space-y-3">
+                  {displayedAllNewsList.map(renderNewsCard)}
+                </div>
               )}
             </div>
           )}
@@ -2242,10 +2245,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                 />
               </div>
 
-              {/* 📅 วันที่ของข่าวนี้ = วันที่เลือกไว้บนปฏิทินกลุ่ม (เปลี่ยนได้โดยปิด modal แล้วเลือกวันอื่นบนปฏิทิน) */}
-              <div className="flex items-center gap-2 border-2 border-black rounded-xl px-3 py-2.5 bg-gray-50">
-                <CalendarClock className="w-4 h-4 text-black shrink-0" />
-                <span className="font-bold text-gray-800">แจ้งข่าวสำหรับวันที่ {selectedDateLabel}</span>
+              {/* 📅 วันที่ของข่าวนี้ — เลือกได้ตรงๆ ในฟอร์ม (ไม่ต้องใช้ปฏิทินแล้ว) */}
+              <div>
+                <label className="block mb-1 font-bold text-gray-800">วันที่แจ้งข่าว</label>
+                <input
+                  type="date"
+                  value={newNewsDate}
+                  onChange={(e) => setNewNewsDate(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black rounded-xl text-gray-800 focus:outline-none"
+                />
               </div>
 
               <div>

@@ -168,6 +168,9 @@ const MainContent: React.FC = () => {
         isSyncing={isSyncing}
         onOpenSettings={() => setIsProfileOpen(true)}
         onNavigateSettings={() => setActiveTab('settings')}
+        tasks={tasks}
+        authUserUid={authUser?.uid}
+        onNavigateTab={setActiveTab}
       />
 
       <main className="flex-1 w-full max-w-md mx-auto relative">
