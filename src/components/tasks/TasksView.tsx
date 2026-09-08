@@ -56,8 +56,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
   // ----------------------------------------------------
   // 'today'  = แสดงเฉพาะงานของวันนี้ (ค่าเริ่มต้น)
   // 'all'    = แสดงงานทั้งหมด ไม่กรองตามวันที่
+  // 'day'    = แสดงเฉพาะงานของวันเดียวที่ผู้ใช้เลือกเอง (ดู customStartDate)
   // 'custom' = แสดงเฉพาะงานในช่วงวันที่ที่ผู้ใช้เลือกเอง (ดู customStartDate / customEndDate)
-  type TaskDateFilterMode = 'all' | 'today' | 'custom';
+  type TaskDateFilterMode = 'all' | 'today' | 'day' | 'custom';
   const todayStr = getLocalTodayStr();
   const [dateFilterMode, setDateFilterMode] = useState<TaskDateFilterMode>('today');
   const [customStartDate, setCustomStartDate] = useState<string>(todayStr);
@@ -366,6 +367,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
     if (task.eisenhowerQuadrant !== activeQuadrant) return false;
     if (effectiveCategoryFilter !== 'all' && task.category !== effectiveCategoryFilter) return false;
     if (dateFilterMode === 'today') return task.dueDate === todayStr;
+    if (dateFilterMode === 'day') return task.dueDate === customStartDate;
     if (dateFilterMode === 'custom') return task.dueDate >= effectiveRangeStart && task.dueDate <= effectiveRangeEnd;
     return true; // 'all' ➔ ไม่กรองตามวันที่
   });
@@ -427,6 +429,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             // ที่ตรงกับ activeQuadrant เพื่อไม่ให้ตัวเลขของ Quadrant อื่นเพี้ยนไปตามหมวดหมู่ที่เลือก
             if (q.id === activeQuadrant && effectiveCategoryFilter !== 'all' && t.category !== effectiveCategoryFilter) return false;
             if (dateFilterMode === 'today') return t.dueDate === todayStr;
+            if (dateFilterMode === 'day') return t.dueDate === customStartDate;
             if (dateFilterMode === 'custom') return t.dueDate >= effectiveRangeStart && t.dueDate <= effectiveRangeEnd;
             return true;
           }).length;
@@ -521,7 +524,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
 
           <div className="flex bg-white doodle-border-pill doodle-shadow-sm p-0.5 gap-0.5 shrink-0">
-            {(['today', 'all', 'custom'] as const).map((mode) => (
+            {(['today', 'all', 'day', 'custom'] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -534,10 +537,24 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   ? (user.language === 'th' ? 'วันนี้' : 'Today')
                   : mode === 'all'
                   ? (user.language === 'th' ? 'ทั้งหมด' : 'All')
+                  : mode === 'day'
+                  ? (user.language === 'th' ? 'เลือกวัน' : 'Pick date')
                   : (user.language === 'th' ? 'เลือกช่วงเวลา' : 'Date range')}
               </button>
             ))}
           </div>
+
+          {dateFilterMode === 'day' && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="doodle-input text-[11px] font-bold px-2 py-1"
+                aria-label={user.language === 'th' ? 'เลือกวัน' : 'Pick date'}
+              />
+            </div>
+          )}
 
           {dateFilterMode === 'custom' && (
             <div className="flex items-center gap-1.5 flex-wrap">

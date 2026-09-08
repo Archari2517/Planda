@@ -226,7 +226,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   // 'today'  = แสดงเฉพาะงานของวันนี้จริงๆ
   // 'all'    = แสดงงานทั้งหมดของกลุ่ม ไม่กรองตามวันที่ (รวมงานที่ยังไม่ระบุวันที่ด้วย) — ค่าเริ่มต้น
   // 'custom' = แสดงเฉพาะงานในช่วงวันที่ที่เลือกเอง (รวมถึงตอนกดเลือกวันบนปฏิทินด้านล่าง)
-  type GroupTaskDateFilterMode = 'today' | 'all' | 'custom';
+  type GroupTaskDateFilterMode = 'today' | 'all' | 'day' | 'custom';
   const [taskDateFilterMode, setTaskDateFilterMode] = useState<GroupTaskDateFilterMode>('all');
   const [taskCustomStartDate, setTaskCustomStartDate] = useState<string>(getLocalTodayStr());
   const [taskCustomEndDate, setTaskCustomEndDate] = useState<string>(getLocalTodayStr());
@@ -1016,8 +1016,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     setSelectedDate(dateStr);
     const selectedObj = new Date(dateStr);
     setViewMonthDate(new Date(selectedObj.getFullYear(), selectedObj.getMonth(), 1));
-    // เลือกวันบนปฏิทิน = ต้องการดูงานของวันนั้นวันเดียว ➔ สลับตัวกรองวันที่ของรายการงานเป็น "เลือกช่วงเวลา" แบบวันเดียว
-    setTaskDateFilterMode('custom');
+    // เลือกวันบนปฏิทิน = ต้องการดูงานของวันนั้นวันเดียว ➔ สลับตัวกรองวันที่ของรายการงานเป็น "เลือกวัน"
+    setTaskDateFilterMode('day');
     setTaskCustomStartDate(dateStr);
     setTaskCustomEndDate(dateStr);
   };
@@ -1195,6 +1195,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
   const dateAndCategoryFilteredTasks = tasks.filter((t) => {
     if (effectiveTaskCategoryFilter !== 'all' && t.category !== effectiveTaskCategoryFilter) return false;
     if (taskDateFilterMode === 'today') return t.dueDate === todayStr;
+    if (taskDateFilterMode === 'day') return t.dueDate === taskCustomStartDate;
     if (taskDateFilterMode === 'custom') {
       return !!t.dueDate && t.dueDate >= taskCustomStartDate && t.dueDate <= taskCustomEndDate;
     }
@@ -1703,7 +1704,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                       ? 'งานวันนี้'
                       : taskDateFilterMode === 'all'
                       ? 'งานทั้งหมด'
-                      : taskCustomStartDate === taskCustomEndDate
+                      : taskDateFilterMode === 'day' || taskCustomStartDate === taskCustomEndDate
                       ? `งานวันที่ ${new Date(taskCustomStartDate).toLocaleDateString('th-TH', {
                           weekday: 'short',
                           day: 'numeric',
@@ -1741,7 +1742,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                 )}
 
                 <div className="flex bg-white doodle-border-pill doodle-shadow-sm p-0.5 gap-0.5 shrink-0">
-                  {(['today', 'all', 'custom'] as const).map((mode) => (
+                  {(['today', 'all', 'day', 'custom'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -1750,10 +1751,28 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
                         taskDateFilterMode === mode ? 'bg-accent text-[#1A1A1A]' : 'text-gray-400'
                       }`}
                     >
-                      {mode === 'today' ? 'วันนี้' : mode === 'all' ? 'ทั้งหมด' : 'เลือกช่วงเวลา'}
+                      {mode === 'today'
+                        ? 'วันนี้'
+                        : mode === 'all'
+                        ? 'ทั้งหมด'
+                        : mode === 'day'
+                        ? 'เลือกวัน'
+                        : 'เลือกช่วงเวลา'}
                     </button>
                   ))}
                 </div>
+
+                {taskDateFilterMode === 'day' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <input
+                      type="date"
+                      value={taskCustomStartDate}
+                      onChange={(e) => setTaskCustomStartDate(e.target.value)}
+                      className="doodle-input text-[11px] font-bold px-2 py-1"
+                      aria-label="เลือกวัน"
+                    />
+                  </div>
+                )}
 
                 {taskDateFilterMode === 'custom' && (
                   <div className="flex items-center gap-1.5 flex-wrap">
