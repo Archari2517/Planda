@@ -1,3 +1,4 @@
+import { enablePushNotifications } from '../../lib/messaging';
 import React, { useState } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { UserProfile, ThemeAccent, Language, EnergyType, Goal, Routine, RoutineScheduleType, RoutineDurationMode, RoutineCategory } from '../../types';
@@ -550,6 +551,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
       </div>
+      {/* Accordion: Push Notifications */}
+<div className="bg-white dark:bg-[#1e293b] doodle-border doodle-shadow overflow-hidden transition-colors">
+  <button
+    onClick={() => toggleSection('notifications')}
+    className="w-full p-4 flex items-center justify-between font-extrabold text-sm font-['Space_Grotesk'] text-gray-900 dark:text-gray-100"
+  >
+    <span className="flex items-center gap-2">
+      <span>🔔</span>
+      <span>{user.language === 'th' ? 'การแจ้งเตือน Push Notification' : 'Push Notifications'}</span>
+    </span>
+    {openSection === 'notifications' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+  </button>
+
+  {openSection === 'notifications' && (
+    <div className="p-4 pt-1 border-t-2 border-black dark:border-slate-700 space-y-3 text-xs">
+      <p className="text-gray-600 dark:text-gray-300 font-medium leading-relaxed">
+        {user.language === 'th'
+          ? 'รับการแจ้งเตือนงานใหม่ ข่าวสารในกลุ่ม หรือรายการที่ได้รับมอบหมายทันที แม้กระทั่งตอนปิดแอป'
+          : 'Receive instant notifications for new tasks and group updates even when the app is closed.'}
+      </p>
+
+      <button
+        onClick={async () => {
+          if (!authUser) return;
+          const result = await enablePushNotifications(authUser.uid);
+          if (result === 'granted') {
+            alert(user.language === 'th' ? 'เปิดการแจ้งเตือนสำเร็จ!' : 'Push notifications enabled!');
+          } else if (result === 'denied') {
+            alert(user.language === 'th' ? 'คุณปฏิเสธการอนุญาตแจ้งเตือน กรุณาเปิดสิทธิ์ในเบราว์เซอร์' : 'Notification permission was denied.');
+          } else {
+            alert(user.language === 'th' ? 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับ' : 'Push notifications are unsupported.');
+          }
+        }}
+        className="w-full bg-accent text-[#1A1A1A] py-3 doodle-border-sm font-black text-xs doodle-btn flex items-center justify-center gap-2"
+      >
+        <span>🔔</span>
+        {user.language === 'th' ? 'เปิดการแจ้งเตือนบนอุปกรณ์นี้' : 'Enable Push Notifications'}
+      </button>
+    </div>
+  )}
+</div>
 
       {/* Accordion 3.5: Archive — กิจกรรมที่จบแล้ว (Routine ที่หมดอายุ) */}
       {archivedRoutinesList.length > 0 && (

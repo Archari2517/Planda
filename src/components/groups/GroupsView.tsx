@@ -34,6 +34,7 @@ import { DEFAULT_AVATAR_URL } from '../../context/AppContext';
 
 // Import Firebase Config & Firestore Methods
 import { db, auth } from '../../lib/firebase';
+import { notifyGroupMembers } from '../../services/pushNotificationService';
 import { 
   collection, 
   query, 
@@ -670,6 +671,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         createdAt: new Date().toISOString()
       });
 
+      // 🔔 แจ้งเตือนสมาชิกกลุ่มคนอื่น (push notification) ว่ามีงานใหม่
+      notifyGroupMembers({
+        memberIds: selectedGroup.memberIds || [],
+        excludeUid: currentUser.uid,
+        title: `งานใหม่จาก ${selectedGroup.name}`,
+        body: taskTitle,
+        url: '/groups',
+      });
+
       resetTaskForm();
       setShowAddTaskModal(false);
     } catch (error) {
@@ -847,6 +857,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         creatorId: currentUser.uid,
         acknowledgedBy: [],
         createdAt: new Date().toISOString(),
+      });
+
+      // 🔔 แจ้งเตือนสมาชิกกลุ่มคนอื่น (push notification) ว่ามีข่าวใหม่
+      notifyGroupMembers({
+        memberIds: selectedGroup.memberIds || [],
+        excludeUid: currentUser.uid,
+        title: `ข่าวใหม่จาก ${selectedGroup.name}`,
+        body: newsTitle.trim(),
+        url: '/groups',
       });
 
       resetNewsForm();

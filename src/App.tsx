@@ -4,6 +4,7 @@ import { Header } from './components/layout/Header';
 import { BottomNav } from './components/layout/BottomNav';
 import { LoginView } from './components/auth/LoginView';
 import { RoutineExpiryAlert } from './components/routines/RoutineExpiryAlert';
+import { listenForegroundMessages } from './lib/messaging';
 
 const CalendarView = lazy(() =>
   import('./components/calendar/CalendarView').then(m => ({ default: m.CalendarView }))
@@ -78,6 +79,12 @@ const MainContent: React.FC = () => {
   } = useApp();
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  // 🔔 ฟัง push notification ตอนแอปเปิดอยู่ (foreground) — ให้พฤติกรรมเหมือนตอนปิดแอป
+  // (background push จัดการโดย public/firebase-messaging-sw.js แยกต่างหาก)
+  useEffect(() => {
+    listenForegroundMessages();
+  }, []);
 
   // 🚪 ออกจากระบบจริง (Firebase signOut) — authUser จะกลายเป็น null หลังจากนี้ ทำให้
   // MainContent เด้งกลับไปแสดง <LoginView /> โดยอัตโนมัติ (ดูเงื่อนไข `if (!authUser)` ด้านล่าง)
