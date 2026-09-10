@@ -665,7 +665,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         durationMins,
         location,
         dueDate: selectedDate,
-        sharedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
+        sharedBy: user?.name || currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
         creatorId: currentUser.uid,
         responses: {},
         createdAt: new Date().toISOString()
@@ -853,7 +853,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
         location: newsLocation.trim(),
         newsDate: newNewsDate,
         newsTime,
-        postedBy: currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
+        postedBy: user?.name || currentUser.displayName || currentUser.email?.split('@')[0] || 'สมาชิกในกลุ่ม',
         creatorId: currentUser.uid,
         acknowledgedBy: [],
         createdAt: new Date().toISOString(),
