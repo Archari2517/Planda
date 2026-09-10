@@ -354,6 +354,40 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
     return () => unsubscribe();
   }, [selectedGroup?.id, currentUser?.uid]);
 
+  // 🔄 ดึงชื่อ/รูปโปรไฟล์ล่าสุดของสมาชิกแบบ real-time จาก users collection
+  // เหตุผล: ข้อมูลใน selectedGroup.members (name/avatarUrl) เป็นแค่ "สำเนา" ที่ถูก
+  // บันทึกไว้ตอนสร้างกลุ่ม/ตอนเชิญเข้ากลุ่มเท่านั้น ถ้าใครไปแก้ชื่อหรือรูปโปรไฟล์ทีหลัง
+  // ค่าที่เก็บไว้ในเอกสารกลุ่มจะไม่อัปเดตตาม จึงต้อง subscribe ไปที่ users/{uid} ของ
+  // สมาชิกแต่ละคนเพื่อเอาชื่อ/รูปล่าสุดมาแสดงผลแทน โดยไม่ต้องแก้ข้อมูลเดิมในกลุ่ม
+  const [liveMemberProfiles, setLiveMemberProfiles] = useState<Record<string, { name?: string; avatarUrl?: string }>>({});
+
+  useEffect(() => {
+    const memberIds = Array.from(
+      new Set((selectedGroup?.members || []).map((m) => m.id).filter((id): id is string => !!id))
+    );
+
+    if (memberIds.length === 0) {
+      setLiveMemberProfiles({});
+      return;
+    }
+
+    const unsubscribers = memberIds.map((uid) =>
+      onSnapshot(doc(db, 'users', uid), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as { name?: string; displayName?: string; avatarUrl?: string };
+        setLiveMemberProfiles((prev) => ({
+          ...prev,
+          [uid]: {
+            name: data.name || data.displayName,
+            avatarUrl: data.avatarUrl,
+          },
+        }));
+      })
+    );
+
+    return () => unsubscribers.forEach((unsub) => unsub());
+  }, [selectedGroup?.id, (selectedGroup?.members || []).map((m) => m.id).join(',')]);
+
   // Real-time Fetch Tasks
   useEffect(() => {
     if (!selectedGroup) return;
@@ -1888,24 +1922,29 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ user }) => {
 
           {activeTab === 'members' && (
             <div className="bg-white doodle-border doodle-shadow divide-y-2 divide-black">
-              {selectedGroup.members?.map((member) => (
-                <div key={member.id || member.email} className="p-3.5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <MemberAvatar name={member.name} email={member.email} avatarUrl={member.avatarUrl} />
-                    <div>
-                      <p className="text-xs font-extrabold text-black">{member.name}</p>
+              {selectedGroup.members?.map((member) => {
+                const liveProfile = member.id ? liveMemberProfiles[member.id] : undefined;
+                const displayName = liveProfile?.name || member.name;
+                const displayAvatar = resolveMemberAvatar(liveProfile?.avatarUrl) || member.avatarUrl;
+                return (
+                  <div key={member.id || member.email} className="p-3.5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <MemberAvatar name={displayName} email={member.email} avatarUrl={displayAvatar} />
+                      <div>
+                        <p className="text-xs font-extrabold text-black">{displayName}</p>
+                      </div>
                     </div>
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 doodle-border-sm flex items-center gap-1 ${
+                      member.role === 'Owner' 
+                        ? 'bg-amber-200 text-black' 
+                        : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {member.role === 'Owner' && <IconShield className="w-3 h-3" />}
+                      {member.role}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-black px-2.5 py-0.5 doodle-border-sm flex items-center gap-1 ${
-                    member.role === 'Owner' 
-                      ? 'bg-amber-200 text-black' 
-                      : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    {member.role === 'Owner' && <IconShield className="w-3 h-3" />}
-                    {member.role}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
