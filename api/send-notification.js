@@ -15,7 +15,7 @@
 //   FIREBASE_CLIENT_EMAIL
 //   FIREBASE_PRIVATE_KEY
 
-const admin = require('firebase-admin');
+import admin from 'firebase-admin';
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -30,7 +30,7 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -83,4 +83,4 @@ module.exports = async function handler(req, res) {
     console.error('send-notification error:', err);
     return res.status(500).json({ error: 'ส่งการแจ้งเตือนไม่สำเร็จ' });
   }
-};
+}
