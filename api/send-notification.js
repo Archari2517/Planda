@@ -46,9 +46,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ sent: 0, message: 'ไม่มีอุปกรณ์ไหนเปิดการแจ้งเตือนไว้' });
     }
 
+    // ⚠️ จงใจไม่ใส่ field "notification" — ถ้าใส่ FCM/เบราว์เซอร์จะ auto-แสดง
+    // notification ให้เองทันที ซ้อนกับที่ client (src/lib/messaging.ts +
+    // public/firebase-messaging-sw.js) สร้างเอง ทำให้ผู้ใช้เห็นแจ้งเตือน 2 อัน
+    // ส่งเป็น data-only message แล้วให้ client เป็นคนโชว์ notification เองทั้งหมด
+    // (data payload ทุก field ต้องเป็น string เท่านั้น ตามข้อกำหนดของ FCM)
+    const rawData = { ...(data || {}), title, body: body || '' };
+    const stringData = Object.fromEntries(
+      Object.entries(rawData).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
+    );
+
     const message = {
-      notification: { title, body: body || '' },
-      data: data || {},
+      data: stringData,
       tokens: safeTokens,
     };
 

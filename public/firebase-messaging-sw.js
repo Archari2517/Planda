@@ -25,9 +25,14 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // เมื่อมี push เข้ามาตอนแอปปิดอยู่/อยู่เบื้องหลัง — โชว์เป็น OS notification
+//
+// ⚠️ backend (api/send-notification.js) ส่งเป็น "data-only" message (ไม่มี field
+// "notification") โดยตั้งใจ เพื่อไม่ให้เบราว์เซอร์ auto-แสดง notification เองซ้อนกับ
+// ที่ handler นี้สร้าง — ถ้า backend กลับไปส่ง payload.notification มาอีก จะเห็น
+// แจ้งเตือนซ้อน 2 อันเหมือนเดิม (อ่านจาก payload.data อย่างเดียวพอ)
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || payload.data?.title || 'แจ้งเตือนใหม่';
-  const body = payload.notification?.body || payload.data?.body || '';
+  const title = payload.data?.title || 'แจ้งเตือนใหม่';
+  const body = payload.data?.body || '';
 
   self.registration.showNotification(title, {
     body,

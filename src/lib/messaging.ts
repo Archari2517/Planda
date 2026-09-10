@@ -71,17 +71,21 @@ export async function disablePushNotifications(uid: string) {
 }
 
 /**
- * ฟัง push ตอนแอปเปิดอยู่ (foreground) — ปกติ FCM จะไม่โชว์ system notification ให้เองตอน foreground
- * เลยต้องดักแล้วสร้าง Notification เองให้พฤติกรรมเหมือนกับตอน background
+ * ฟัง push ตอนแอปเปิดอยู่ (foreground) — สร้าง Notification เองให้พฤติกรรมเหมือนกับตอน background
  * เรียกครั้งเดียวตอนแอป mount (เช่นใน App.tsx หรือ AppContext)
+ *
+ * ⚠️ backend (api/send-notification.js) ส่งเป็น "data-only" message (ไม่มี field
+ * "notification") โดยตั้งใจ เพื่อไม่ให้เบราว์เซอร์ auto-แสดง notification เอง
+ * ถ้าจะรื้อกลับไปอ่าน payload.notification ต้องเช็คให้แน่ใจว่า backend ไม่ได้ส่ง
+ * field นั้นมาด้วย ไม่งั้นจะกลับไปเห็นแจ้งเตือนซ้อน 2 อันเหมือนเดิม
  */
 export function listenForegroundMessages() {
   isSupported().then((supported) => {
     if (!supported) return;
     const messaging = getMessaging(app);
     onMessage(messaging, (payload) => {
-      const title = payload.notification?.title || payload.data?.title || 'แจ้งเตือนใหม่';
-      const body = payload.notification?.body || payload.data?.body || '';
+      const title = payload.data?.title || 'แจ้งเตือนใหม่';
+      const body = payload.data?.body || '';
       if (Notification.permission === 'granted') {
         new Notification(title, { body, icon: '/app-icon.jpg' });
       }
