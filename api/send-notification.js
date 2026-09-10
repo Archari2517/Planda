@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       if (Array.isArray(userTokens)) tokens.push(...userTokens);
     });
 
-    const safeTokens = tokens || [];
+    const safeTokens = Array.from(new Set(tokens || []));
     if (safeTokens.length === 0) {
       return res.status(200).json({ sent: 0, message: 'ไม่มีอุปกรณ์ไหนเปิดการแจ้งเตือนไว้' });
     }
