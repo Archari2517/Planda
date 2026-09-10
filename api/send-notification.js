@@ -27,8 +27,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'ต้องส่ง uids (array) และ title มาด้วย' });
     }
 
+    // กัน uid ซ้ำที่ฝั่ง client อาจส่งมาซ้ำ
+    const uniqueUids = [...new Set(uids)];
+
     // ดึง fcmTokens ของผู้ใช้ทุกคน
-    const userDocs = await Promise.all(uids.map((uid) => db.collection('users').doc(uid).get()));
+    const userDocs = await Promise.all(uniqueUids.map((uid) => db.collection('users').doc(uid).get()));
 
     const tokens = [];
     userDocs.forEach((snap) => {
@@ -36,7 +39,9 @@ export default async function handler(req, res) {
       if (Array.isArray(userTokens)) tokens.push(...userTokens);
     });
 
-    const safeTokens = tokens || [];
+    // กัน token ซ้ำ (เครื่องเดียวกันมี token ซ้ำในเอกสารเดียวกัน หรือ token เดียวกันไปอยู่คนละ uid)
+    // เป็นสาเหตุหลักที่ทำให้อุปกรณ์เดียวได้รับแจ้งเตือน 2 อัน
+    const safeTokens = [...new Set(tokens)];
     if (safeTokens.length === 0) {
       return res.status(200).json({ sent: 0, message: 'ไม่มีอุปกรณ์ไหนเปิดการแจ้งเตือนไว้' });
     }
