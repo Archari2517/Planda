@@ -17,12 +17,11 @@
 
 import admin from 'firebase-admin';
 
-if (!admin.apps.length) {
+if (!admin.apps?.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // Vercel เก็บ newline ใน env var เป็น "\\n" ต้องแปลงกลับเป็น newline จริง
       privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
     }),
   });
@@ -39,8 +38,8 @@ export default async function handler(req, res) {
     const { uids, title, body, data } = req.body;
 
     if (!Array.isArray(uids) || uids.length === 0 || !title) {
-      return res.status(400).json({ error: 'ต้องส่ง uids (array) และ title มาด้วย' });
-    }
+  return res.status(400).json({ error: 'ต้องส่ง uids (array) และ title มาด้วย' });
+}
 
     // ดึง fcmTokens ของผู้ใช้ทุกคนที่ต้องการแจ้งเตือน
     const userDocs = await Promise.all(uids.map((uid) => db.collection('users').doc(uid).get()));
@@ -51,9 +50,10 @@ export default async function handler(req, res) {
       if (Array.isArray(userTokens)) tokens.push(...userTokens);
     });
 
-    if (tokens.length === 0) {
-      return res.status(200).json({ sent: 0, message: 'ไม่มีอุปกรณ์ไหนเปิดการแจ้งเตือนไว้' });
-    }
+    const safeTokens = tokens || [];
+if (safeTokens.length === 0) {
+  return res.status(200).json({ sent: 0, message: 'ไม่มีอุปกรณ์ไหนเปิดการแจ้งเตือนไว้' });
+}
 
     const message = {
       notification: { title, body: body || '' },
@@ -70,13 +70,14 @@ export default async function handler(req, res) {
         deadTokens.push(tokens[i]);
       }
     });
-    if (deadTokens.length > 0) {
-      await Promise.all(
-        userDocs.map((snap) =>
-          snap.ref.update({ fcmTokens: admin.firestore.FieldValue.arrayRemove(...deadTokens) }).catch(() => {})
-        )
-      );
-    }
+    const safeDeadTokens = deadTokens || [];
+if (safeDeadTokens.length > 0) {
+  await Promise.all(
+    userDocs.map((snap) =>
+      snap.ref.update({ fcmTokens: admin.firestore.FieldValue.arrayRemove(...safeDeadTokens) }).catch(() => {})
+    )
+  );
+}
 
     return res.status(200).json({ sent: response.successCount, failed: response.failureCount });
   } catch (err) {
