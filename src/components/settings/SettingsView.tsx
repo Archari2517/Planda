@@ -1,5 +1,5 @@
-import { enablePushNotifications } from '../../lib/messaging';
-import React, { useState } from 'react';
+import { enablePushNotifications, disablePushNotifications } from '../../lib/messaging';
+import React, { useState, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { UserProfile, ThemeAccent, Language, EnergyType, Goal, Routine, RoutineScheduleType, RoutineDurationMode, RoutineCategory } from '../../types';
 import { useTranslation } from '../../utils/translations';
@@ -89,6 +89,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [openSection, setOpenSection] = useState<string | null>('display');
+
+  // 🔔 สถานะ Push Notification บนอุปกรณ์นี้ — ใช้ Notification.permission ของเบราว์เซอร์
+  // เป็นตัวบอกสถานะ "เปิด/ปิด" เพราะเป็นค่าที่เชื่อถือได้ตรงๆ จากอุปกรณ์ที่ใช้อยู่จริง
+  // (ต่างจากการเช็ค fcmTokens ใน Firestore ซึ่งบอกได้แค่ว่าเคยเปิดจากอุปกรณ์ไหนมาบ้าง)
+  const [isPushSupported, setIsPushSupported] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setIsPushSupported(false);
+      return;
+    }
+    setPushEnabled(Notification.permission === 'granted');
+  }, []);
+
+  const handleTogglePushNotifications = async () => {
+    if (!authUser || pushLoading) return;
+    setPushLoading(true);
+    try {
+      if (pushEnabled) {
+        // ปิดการแจ้งเตือน: เอา token ของอุปกรณ์นี้ออกจาก Firestore เพื่อไม่ให้ backend
+        // ส่ง push มาที่เครื่องนี้อีก (สิทธิ์ระดับเบราว์เซอร์ยังเป็น "granted" อยู่ เพราะ
+        // เว็บไม่มีสิทธิ์ยกเลิก permission เอง ผู้ใช้ต้องไปปิดเองในตั้งค่าเบราว์เซอร์ถ้าต้องการ)
+        await disablePushNotifications(authUser.uid);
+        setPushEnabled(false);
+      } else {
+        const result = await enablePushNotifications(authUser.uid);
+        if (result === 'granted') {
+          setPushEnabled(true);
+        } else if (result === 'denied') {
+          alert(user.language === 'th' ? 'คุณปฏิเสธการอนุญาตแจ้งเตือน กรุณาเปิดสิทธิ์ในเบราว์เซอร์' : 'Notification permission was denied.');
+        } else {
+          setIsPushSupported(false);
+          alert(user.language === 'th' ? 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับ' : 'Push notifications are unsupported.');
+        }
+      }
+    } finally {
+      setPushLoading(false);
+    }
+  };
   const [syncMessage, setSyncMessage] = useState('');
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
@@ -572,23 +613,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           : 'Receive instant notifications for new tasks and group updates even when the app is closed.'}
       </p>
 
-      <button
-        onClick={async () => {
-          if (!authUser) return;
-          const result = await enablePushNotifications(authUser.uid);
-          if (result === 'granted') {
-            alert(user.language === 'th' ? 'เปิดการแจ้งเตือนสำเร็จ!' : 'Push notifications enabled!');
-          } else if (result === 'denied') {
-            alert(user.language === 'th' ? 'คุณปฏิเสธการอนุญาตแจ้งเตือน กรุณาเปิดสิทธิ์ในเบราว์เซอร์' : 'Notification permission was denied.');
-          } else {
-            alert(user.language === 'th' ? 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับ' : 'Push notifications are unsupported.');
-          }
-        }}
-        className="w-full bg-accent text-[#1A1A1A] py-3 doodle-border-sm font-black text-xs doodle-btn flex items-center justify-center gap-2"
-      >
-        <span>🔔</span>
-        {user.language === 'th' ? 'เปิดการแจ้งเตือนบนอุปกรณ์นี้' : 'Enable Push Notifications'}
-      </button>
+      {!isPushSupported ? (
+        <p className="text-gray-500 dark:text-gray-400 font-bold text-[11px]">
+          {user.language === 'th' ? 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับการแจ้งเตือน' : 'Push notifications are unsupported on this device.'}
+        </p>
+      ) : (
+        <div className="flex items-center justify-between bg-gray-50 dark:bg-slate-800 doodle-border-sm px-3 py-2.5">
+          <span className="font-black text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <span>🔔</span>
+            {user.language === 'th' ? 'เปิดการแจ้งเตือนบนอุปกรณ์นี้' : 'Push Notifications'}
+          </span>
+
+          {/* Toggle switch */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={pushEnabled}
+            disabled={pushLoading}
+            onClick={handleTogglePushNotifications}
+            className={`relative w-11 h-6 shrink-0 doodle-border-sm transition-colors ${
+              pushEnabled ? 'bg-accent' : 'bg-gray-300 dark:bg-slate-600'
+            } ${pushLoading ? 'opacity-60 cursor-wait' : ''}`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white border-2 border-black transition-transform ${
+                pushEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      )}
+
+      {pushEnabled && (
+        <p className="text-gray-500 dark:text-gray-400 font-medium text-[11px] leading-relaxed">
+          {user.language === 'th'
+            ? 'หมายเหตุ: ถ้ากดปิดแล้วยังได้รับแจ้งเตือนจากเบราว์เซอร์ ให้เข้าไปปิดสิทธิ์การแจ้งเตือนของเว็บไซต์นี้ในตั้งค่าเบราว์เซอร์ด้วย'
+            : 'Note: if you still see browser prompts after turning this off, also revoke notification permission for this site in your browser settings.'}
+        </p>
+      )}
     </div>
   )}
 </div>
