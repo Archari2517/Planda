@@ -27,11 +27,26 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'ต้องส่ง uids (array) และ title มาด้วย' });
     }
 
+    // 🔍 DEBUG: ดูว่า Admin SDK ตัวนี้ init ด้วย project อะไรจริงๆ
+    console.log('[DEBUG] admin app projectId:', getApps()[0]?.options?.credential?.projectId || process.env.FIREBASE_PROJECT_ID);
+    console.log('[DEBUG] raw uids received:', JSON.stringify(uids));
+
     // กัน uid ซ้ำที่ฝั่ง client อาจส่งมาซ้ำ
     const uniqueUids = [...new Set(uids)];
+    console.log('[DEBUG] uniqueUids:', JSON.stringify(uniqueUids), 'length of each uid:', uniqueUids.map(u => u.length));
 
     // ดึง fcmTokens ของผู้ใช้ทุกคน
     const userDocs = await Promise.all(uniqueUids.map((uid) => db.collection('users').doc(uid).get()));
+
+    // 🔍 DEBUG: ดูผลลัพธ์การ query แต่ละ uid ตรงๆ ว่าเจอเอกสารไหม มี fcmTokens ไหม
+    userDocs.forEach((snap, i) => {
+      console.log(
+        '[DEBUG] uid:', uniqueUids[i],
+        '| doc.exists:', snap.exists,
+        '| doc.id:', snap.id,
+        '| fcmTokens:', JSON.stringify(snap.data()?.fcmTokens)
+      );
+    });
 
     const tokens = [];
     userDocs.forEach((snap) => {
