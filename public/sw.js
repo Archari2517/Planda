@@ -1,10 +1,17 @@
 // public/sw.js
-// Minimal service worker. Its only real job is to satisfy PWA installability
+// Minimal service worker. Its main job is to satisfy PWA installability
 // criteria (Chrome requires a registered SW with a fetch handler) and give a
 // basic offline fallback for the app shell. It deliberately does NOT try to
 // cache or intercept Firebase/Gemini/Supabase requests — those are
 // cross-origin, so they're left alone automatically by the same-origin check
 // below. Bump CACHE_NAME whenever you want to force clients to drop old caches.
+//
+// ⚠️ ไฟล์นี้ยังทำหน้าที่รับ push notification ด้วย (รวมมาจาก firebase-messaging-sw.js
+// เดิม) เพราะ 1 origin ควบคุม scope '/' ได้ด้วย service worker แค่ตัวเดียวเท่านั้น
+// ห้ามแยกไฟล์ firebase-messaging-sw.js ออกไป register เองอีก ไม่งั้นจะกลับไปแย่ง
+// scope กันเหมือนเดิม (นี่คือสาเหตุที่แจ้งเตือน push เคยใช้ได้แล้วอยู่ๆ ก็หยุดทำงาน
+// เองทั้งที่ไม่มีใครแก้โค้ดส่วนนั้นเลย — sw.js ตัวนี้ถูก register ซ้ำทุกครั้งที่โหลด
+// หน้าเว็บใน main.tsx จึงชนะแย่งควบคุมจาก firebase-messaging-sw.js ไปเงียบๆ)
 
 const CACHE_NAME = 'planda-shell-v1';
 const APP_SHELL = [
@@ -31,6 +38,51 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
     ).then(() => self.clients.claim())
+  );
+});
+
+// --- Push notification handling ---
+// backend (api/send-notification.js) ส่งเป็น "data-only" message ผ่าน FCM
+// (ไม่มี field "notification") โดยตั้งใจ เพื่อไม่ให้เบราว์เซอร์ auto-แสดง
+// notification ซ้อนกับที่เราโชว์เอง เบราว์เซอร์จะ decrypt payload ให้เองแล้วยิง
+// 'push' event มาตรงๆ ไม่ต้องพึ่ง Firebase SDK ในไฟล์นี้เลย
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (err) {
+    payload = {};
+  }
+
+  // FCM ส่ง data-only message มาเป็นรูปแบบ { data: { title, body, ... } }
+  const data = payload.data || payload;
+  const title = data.title || 'แจ้งเตือนใหม่';
+  const options = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data, // เก็บไว้ใช้ตอนกด notification (เช่น url ที่จะเปิด)
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// กดที่ notification แล้วเปิด/โฟกัสหน้าแอป (ใช้ data.url ถ้ามีส่งมาจาก backend)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(targetUrl) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
   );
 });
 

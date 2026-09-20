@@ -27,7 +27,13 @@ export async function enablePushNotifications(uid: string): Promise<'granted' | 
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return 'denied';
 
-  const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  // ใช้ service worker ตัวเดียวกับที่ main.tsx register ไว้แล้ว (/sw.js)
+  // ห้าม register ไฟล์ /firebase-messaging-sw.js แยกต่างหากอีก เพราะจะไปแย่ง
+  // scope '/' กับ sw.js ตัวหลัก แล้วสลับกันแย่งควบคุมหน้าเว็บ ทำให้ตัวใดตัวหนึ่ง
+  // (มักจะเป็น sw.js เพราะ register ซ้ำทุกครั้งที่โหลดหน้า) ชนะแล้วตัดการรับ push
+  // ของอีกฝั่งทิ้งไปเงียบๆ โดยไม่มี error ใดๆ ให้เห็น — นี่คือสาเหตุที่แจ้งเตือน
+  // เคยใช้ได้แล้วอยู่ๆ ก็หยุดทำงานทั้งที่ไม่ได้แก้โค้ดส่วนนี้เลย
+  const registration = await navigator.serviceWorker.ready;
   const messaging = getMessaging(app);
 
   const token = await getToken(messaging, {
@@ -57,7 +63,7 @@ export async function disablePushNotifications(uid: string) {
   if (!supported) return;
 
   const messaging = getMessaging(app);
-  const registration = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration('/');
   if (!registration) return;
 
   const token = await getToken(messaging, {
