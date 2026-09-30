@@ -51,7 +51,7 @@ self.addEventListener('push', (event) => {
   const options = {
     body: body,
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-badge.png', // 🔥 เปลี่ยนมาใช้ไอคอนขาว-ดำ แก้ปัญหากรอบสี่เหลี่ยมขาว
+    badge: '/icons/icon-badgeฮ2.png', // 🔥 เปลี่ยนมาใช้ไอคอนขาว-ดำ แก้ปัญหากรอบสี่เหลี่ยมขาว
     data: dataField, // เก็บ payloadData ไว้ใช้ตอนกด notification (เช่น targetUrl)
   };
 
