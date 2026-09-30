@@ -2,13 +2,14 @@
 // Minimal service worker satisfying PWA installability criteria & caching core app shell.
 // Handle FCM Push Notifications with robust fallback support for both 'notification' and 'data-only' payloads.
 
-const CACHE_NAME = 'planda-shell-v2'; // Bumped version to force cache refresh
+const CACHE_NAME = 'planda-shell-v3'; // Bumped version to force cache refresh
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/icon-badge.png', // เพิ่มไฟล์ Badge ขาว-ดำ
 ];
 
 self.addEventListener('install', (event) => {
@@ -50,7 +51,7 @@ self.addEventListener('push', (event) => {
   const options = {
     body: body,
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    badge: '/icons/icon-badge.png', // 🔥 เปลี่ยนมาใช้ไอคอนขาว-ดำ แก้ปัญหากรอบสี่เหลี่ยมขาว
     data: dataField, // เก็บ payloadData ไว้ใช้ตอนกด notification (เช่น targetUrl)
   };
 
