@@ -1,19 +1,8 @@
 // public/sw.js
-// Minimal service worker. Its main job is to satisfy PWA installability
-// criteria (Chrome requires a registered SW with a fetch handler) and give a
-// basic offline fallback for the app shell. It deliberately does NOT try to
-// cache or intercept Firebase/Gemini/Supabase requests — those are
-// cross-origin, so they're left alone automatically by the same-origin check
-// below. Bump CACHE_NAME whenever you want to force clients to drop old caches.
-//
-// ⚠️ ไฟล์นี้ยังทำหน้าที่รับ push notification ด้วย (รวมมาจาก firebase-messaging-sw.js
-// เดิม) เพราะ 1 origin ควบคุม scope '/' ได้ด้วย service worker แค่ตัวเดียวเท่านั้น
-// ห้ามแยกไฟล์ firebase-messaging-sw.js ออกไป register เองอีก ไม่งั้นจะกลับไปแย่ง
-// scope กันเหมือนเดิม (นี่คือสาเหตุที่แจ้งเตือน push เคยใช้ได้แล้วอยู่ๆ ก็หยุดทำงาน
-// เองทั้งที่ไม่มีใครแก้โค้ดส่วนนั้นเลย — sw.js ตัวนี้ถูก register ซ้ำทุกครั้งที่โหลด
-// หน้าเว็บใน main.tsx จึงชนะแย่งควบคุมจาก firebase-messaging-sw.js ไปเงียบๆ)
+// Minimal service worker satisfying PWA installability criteria & caching core app shell.
+// Handle FCM Push Notifications with robust fallback support for both 'notification' and 'data-only' payloads.
 
-const CACHE_NAME = 'planda-shell-v1';
+const CACHE_NAME = 'planda-shell-v2'; // Bumped version to force cache refresh
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -26,9 +15,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL).catch(() => {
-      // Non-fatal: some assets (e.g. hashed bundle files) don't exist yet at
-      // install time. The app shell still installs; runtime caching below
-      // fills in the rest as they're fetched.
+      // Non-fatal fallback for assets not ready at install time
     }))
   );
 });
@@ -42,26 +29,29 @@ self.addEventListener('activate', (event) => {
 });
 
 // --- Push notification handling ---
-// backend (api/send-notification.js) ส่งเป็น "data-only" message ผ่าน FCM
-// (ไม่มี field "notification") โดยตั้งใจ เพื่อไม่ให้เบราว์เซอร์ auto-แสดง
-// notification ซ้อนกับที่เราโชว์เอง เบราว์เซอร์จะ decrypt payload ให้เองแล้วยิง
-// 'push' event มาตรงๆ ไม่ต้องพึ่ง Firebase SDK ในไฟล์นี้เลย
+// Handles both 'notification' payloads (from Firebase Console/Backend) and 'data-only' payloads
 self.addEventListener('push', (event) => {
   let payload = {};
-  try {
-    payload = event.data ? event.data.json() : {};
-  } catch (err) {
-    payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (err) {
+      payload = { data: { body: event.data.text() } };
+    }
   }
 
-  // FCM ส่ง data-only message มาเป็นรูปแบบ { data: { title, body, ... } }
-  const data = payload.data || payload;
-  const title = data.title || 'แจ้งเตือนใหม่';
+  // อ่านค่าจาก notification payload ก่อน ถ้าไม่มีค่อยสลับไปอ่านจาก data payload
+  const notificationField = payload.notification || {};
+  const dataField = payload.data || (payload.notification ? {} : payload);
+
+  const title = notificationField.title || dataField.title || 'แจ้งเตือนใหม่';
+  const body = notificationField.body || dataField.body || '';
+
   const options = {
-    body: data.body || '',
+    body: body,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    data, // เก็บไว้ใช้ตอนกด notification (เช่น url ที่จะเปิด)
+    data: dataField, // เก็บ payloadData ไว้ใช้ตอนกด notification (เช่น targetUrl)
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -90,15 +80,12 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Only handle GET requests on our own origin. Everything else (Firestore
-  // watch streams, Gemini API calls, Supabase, cross-origin fonts, etc.)
-  // passes straight through untouched.
+  // Only handle GET requests on our own origin.
   if (request.method !== 'GET' || url.origin !== self.location.origin) {
     return;
   }
 
-  // Navigations: network-first so users always get the latest app shell when
-  // online, falling back to the cached shell when offline.
+  // Navigations: network-first
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -112,8 +99,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first, then fall back to network and populate the
-  // cache for next time.
+  // Static assets: cache-first
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
